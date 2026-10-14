@@ -235,6 +235,8 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(ar, ac, ..)| (ar, ac))
             .unwrap_or((r, c));
         if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c)) {
+            // Text replaces a block (a cell holds one or the other).
+            cell.block = None;
             match formula {
                 Some(f) => cell.formula = Some(if f.starts_with('=') { f } else { format!("={f}") }),
                 None => {

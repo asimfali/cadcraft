@@ -63,6 +63,11 @@ fn a_fixed_scale_is_kept_and_an_empty_name_removes_the_block() {
     assert!((b.rotation - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
     s.execute("tinsert", &json!({ "handle": h, "row": 1, "col": 0, "block": "" })).unwrap();
     assert!(table(&s, &h).cells[1][0].block.is_none());
+    // Typing text into a block's cell replaces the block.
+    s.execute("tinsert", &json!({ "handle": h, "row": 1, "col": 0, "block": "TAG" })).unwrap();
+    s.execute("tabledit", &json!({ "at": [5, -6], "text": "text" })).unwrap();
+    let c = &table(&s, &h).cells[1][0];
+    assert_eq!((c.text.as_str(), c.block.is_none()), ("text", true));
 }
 
 #[test]
