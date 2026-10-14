@@ -222,6 +222,13 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
     // GOST 2.304's text heights, then one typed at the command line.
     let mut heights: Vec<Entry> = ["1.8", "2.5", "3.5", "5", "7", "10", "14"].iter().map(|h| item(h, format!("{CELL}height:{h}"))).collect();
     heights.push(item("Other...", format!("{CELL}height:other")));
+    // How the table's rows grow for their text (ESKD forms: in steps of 8 mm).
+    let grow = vec![
+        item("Freely", format!("{CELL}grow:free")),
+        item("In Steps of 8", format!("{CELL}grow:8")),
+        item("In Steps of...", format!("{CELL}grow:other")),
+        item("Fixed Height", format!("{CELL}grow:fixed")),
+    ];
     let weights = |edges: &str| -> Vec<Entry> {
         let mut v: Vec<Entry> =
             ["0.18", "0.25", "0.35", "0.5", "0.7", "1.0"].iter().map(|w| item(&format!("{w} mm"), format!("{CELL}borders:{edges}:{w}"))).collect();
@@ -250,6 +257,7 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         sub("Text Height", heights),
         sub("Text Rotation", rotation),
         item("Column Width and Row Height...", format!("{CELL}size")),
+        sub("Rows Grow for Text", grow),
         item("Remove Formatting", format!("{CELL}clearformat")),
     ];
     if one {
@@ -315,6 +323,18 @@ pub fn act(app: &mut CadApp, action: &str) {
             start_picked(app, "tablesize", &t, (r0, rows, c0, cols), &[]);
             Ok(Value::Null)
         }
+        // TABLESIZE with the width kept, at its row growth: it asks for the step.
+        ["grow", "other"] => {
+            start_picked(
+                app,
+                "tablesize",
+                &t,
+                (r0, rows, c0, cols),
+                &[cadcraft_engine::Input::Enter, cadcraft_engine::Input::Keyword("Grow".into())],
+            );
+            Ok(Value::Null)
+        }
+        ["grow", g] => app.run("tablesize", json!({ "handle": h, "rowGrow": g })),
         // TABLEFORMAT with the selection picked and the alignment kept: it asks for the height.
         ["height", "other"] => {
             start_picked(app, "tableformat", &t, (r0, rows, c0, cols), &[cadcraft_engine::Input::Enter]);
@@ -539,5 +559,21 @@ mod tests {
         // Remove Formatting goes back to the style's height.
         act(&mut a, "clearformat");
         assert!(table(&a, h).is_some_and(|t| t.cells.iter().flatten().all(|c| c.text_height.is_none())));
+    }
+
+    #[test]
+    fn the_menu_sets_how_rows_grow() {
+        let (mut a, h) = app();
+        click(&mut a, Vec2::new(5.0, -2.0), 0.1, false);
+        act(&mut a, "grow:8");
+        assert!(table(&a, h).is_some_and(|t| t.row_grow == cadcraft_engine::doc::RowGrow::Step(8.0)));
+        act(&mut a, "grow:fixed");
+        assert!(table(&a, h).is_some_and(|t| t.row_grow == cadcraft_engine::doc::RowGrow::Fixed));
+        // In Steps of...: the command asks for the step.
+        act(&mut a, "grow:other");
+        assert!(a.session.prompting());
+        let _ = a.session.input(cadcraft_engine::Input::Text("5".into()));
+        assert!(!a.session.prompting());
+        assert!(table(&a, h).is_some_and(|t| t.row_grow == cadcraft_engine::doc::RowGrow::Step(5.0)));
     }
 }

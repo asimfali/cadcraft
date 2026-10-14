@@ -25,7 +25,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("table", "Table...", run_table)
             .menu(&["Draw", "Table..."])
             .alias(&["tb"])
-            .params("{at: [x,y], rows (data rows), cols, rowHeight?, colWidth?, cells?: [[text]], title?: text, header?: [text]}")
+            .params("{at: [x,y], rows (data rows), cols, rowHeight?, colWidth?, cells?: [[text]], title?: text, header?: [text], rowGrow?: free|fixed|step}")
             .interactive(|s| Ok(Box::new(TableM::new(s)))),
         CommandSpec::new("table.set", "Set Table Cell", run_set)
             .params("{handle, row, col, text? (text starting with = is a formula), formula?: \"=Sum(A2:A5)\"}"),
@@ -137,8 +137,11 @@ fn run_table(s: &mut Session, p: &Value) -> Result<Value> {
     let col_width = size_param("table", p, "colWidth", false)?;
     let header: Option<Vec<String>> =
         p.get("header").and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect());
+    let grow = row_grow_param(p).map_err(|m| bad("table", m))?;
     let st = style_of(s);
-    let t = make_table(&st, at, rows, cols, row_height, col_width, str_param(p, "title"), header, &cells);
+    let mut t = make_table(&st, at, rows, cols, row_height, col_width, str_param(p, "title"), header, &cells);
+    t.row_grow = grow.unwrap_or_default();
+    fit_rows(s.doc()?, &mut t);
     let h = s.add_entity(EntityKind::Table(t))?;
     Ok(json!({ "handle": h.hex() }))
 }
@@ -160,14 +163,44 @@ fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std:
     f(&mut t).map_err(|m| bad(id, m))?;
     let st = cadcraft_render::table_style_of(s.doc()?, &t);
     formula::recalc(&mut t, &st);
+    fit_rows(s.doc()?, &mut t);
     s.doc_mut()?.modify_entity(h, |e| e.kind = EntityKind::Table(t))?;
     Ok(json!({ "handle": h.hex() }))
+}
+
+/// `rowGrow`: "free", "fixed" or a step (a number more than 0).
+pub(crate) fn row_grow_param(p: &Value) -> std::result::Result<Option<cadcraft_doc::RowGrow>, String> {
+    use cadcraft_doc::RowGrow;
+    match p.get("rowGrow") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            let g = match v.as_str().map(|s| s.trim().to_ascii_lowercase()) {
+                Some(s) if s == "free" => Some(RowGrow::Free),
+                Some(s) if s == "fixed" || s == "off" => Some(RowGrow::Fixed),
+                Some(s) => s.parse::<f64>().ok().map(RowGrow::Step),
+                None => v.as_f64().map(RowGrow::Step),
+            };
+            g.filter(|g| !matches!(g, RowGrow::Step(s) if !(s.is_finite() && *s > 0.0 && *s <= 1e9)))
+                .map(Some)
+                .ok_or_else(|| format!("invalid rowGrow {v} (free, fixed or a step more than 0)"))
+        }
+    }
+}
+
+/// Grow (or shrink back) the rows of `t` to fit their text, by the table's row growth.
+pub(crate) fn fit_rows(d: &cadcraft_doc::Drawing, t: &mut Table) {
+    let (needs, spans) = cadcraft_render::table_row_needs(d, t);
+    t.fit_rows(&needs, &spans);
 }
 
 /// Make the cell grid rows × cols.
 fn normalize(t: &mut Table) {
     let rows = t.row_heights.len().min(MAX_ROWS);
     let cols = t.col_widths.len().min(MAX_COLS);
+    if t.row_min.len() != t.row_heights.len() {
+        t.row_min.clear();
+    }
+    t.row_min.truncate(rows);
     t.row_heights.truncate(rows);
     t.col_widths.truncate(cols);
     t.cells.resize_with(rows, Vec::new);
@@ -278,6 +311,9 @@ fn run_insert_row(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             })
             .collect();
+        if !t.row_min.is_empty() {
+            t.row_min.insert(r, h);
+        }
         t.row_heights.insert(r, h);
         t.cells.insert(r, vec![TableCell::default(); t.col_widths.len()]);
         if r < t.row_styles.len() {
@@ -313,6 +349,9 @@ fn run_delete_row(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 a.push((ar, ac, rs, cs));
             }
+        }
+        if r < t.row_min.len() {
+            t.row_min.remove(r);
         }
         t.row_heights.remove(r);
         t.cells.remove(r);

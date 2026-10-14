@@ -454,3 +454,69 @@ fn tablesize_sets_widths_and_heights() {
         assert!(s.execute("tablesize", &p).is_err(), "{p}");
     }
 }
+
+#[test]
+fn rows_grow_for_their_text_freely_in_steps_or_not_at_all() {
+    let (mut s, h) = session();
+    let long = "a long text that wraps over several lines in its cell";
+    s.execute("tableformat", &json!({ "handle": h, "scope": "table", "row": 0, "col": 0, "textHeight": 2.5 })).unwrap();
+    s.execute("table.set", &json!({ "handle": h, "row": 1, "col": 0, "text": long })).unwrap();
+    let t = table(&s, &h);
+    let (needs, _) = render::table_row_needs(s.doc().unwrap(), &t);
+    assert!(needs[1] > 8.0, "several lines of 2.5: {needs:?}");
+    assert_eq!(t.row_heights, vec![4.0, needs[1]], "free: as much as the text needs");
+    assert_eq!(t.row_min, vec![4.0, 4.0]);
+    // ESKD: rows grow to multiples of 8.
+    s.execute("tablesize", &json!({ "handle": h, "rowGrow": 8 })).unwrap();
+    let hh = table(&s, &h).row_heights[1];
+    assert!(hh >= needs[1] && hh % 8.0 == 0.0 && hh < needs[1] + 8.0, "{hh}");
+    // Fixed: the row keeps the height it was given.
+    s.execute("tablesize", &json!({ "handle": h, "rowGrow": "fixed" })).unwrap();
+    assert_eq!(table(&s, &h).row_heights, vec![4.0, 4.0]);
+    // Kept through DXF.
+    s.execute("tablesize", &json!({ "handle": h, "rowGrow": "8" })).unwrap();
+    let back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    let t2 = back.model.iter().find_map(|e| if let EntityKind::Table(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    let t = table(&s, &h);
+    assert_eq!((t2.row_grow, t2.row_min.clone()), (t.row_grow, t.row_min.clone()));
+    // A row given a new height grows from it; without the text it shrinks back to it.
+    s.execute("tablesize", &json!({ "handle": h, "row": 1, "col": 0, "height": 6 })).unwrap();
+    s.execute("table.set", &json!({ "handle": h, "row": 1, "col": 0, "text": "" })).unwrap();
+    let t = table(&s, &h);
+    assert_eq!(t.row_heights, vec![4.0, 6.0]);
+    assert!(t.row_min.is_empty());
+    for bad in [json!(0), json!(-8), json!("nan"), json!("huge"), json!({ "step": 8 }), json!(1e300)] {
+        assert!(s.execute("tablesize", &json!({ "handle": h, "rowGrow": bad })).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn inserted_and_deleted_rows_keep_the_given_heights_in_step() {
+    let (mut s, h) = session();
+    s.execute("tableformat", &json!({ "handle": h, "row": 0, "col": 0, "textHeight": 2.5 })).unwrap();
+    s.execute("table.set", &json!({ "handle": h, "row": 0, "col": 0, "text": "a long text that wraps over several lines" })).unwrap();
+    let grown = table(&s, &h).row_heights[0];
+    assert!(grown > 4.0);
+    s.execute("table.insertrow", &json!({ "handle": h, "row": 0, "height": 5 })).unwrap();
+    let t = table(&s, &h);
+    assert_eq!(t.row_heights, vec![5.0, grown, 4.0]);
+    assert_eq!(t.row_min, vec![5.0, 4.0, 4.0]);
+    s.execute("table.deleterow", &json!({ "handle": h, "row": 0 })).unwrap();
+    assert_eq!(table(&s, &h).row_min, vec![4.0, 4.0]);
+}
+
+#[test]
+fn row_growth_at_the_command_line() {
+    let (mut s, h) = session();
+    s.cmdline("tsi").unwrap();
+    s.cmdline("5,-2").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("g").unwrap();
+    s.cmdline("8").unwrap();
+    assert!(!s.prompting());
+    assert_eq!(table(&s, &h).row_grow, cadcraft_engine::doc::RowGrow::Step(8.0));
+    // TABLE makes a table that grows by steps too.
+    let r = s.execute("table", &json!({ "at": [50, 0], "rows": 1, "cols": 1, "rowHeight": 8, "colWidth": 10, "rowGrow": "fixed" })).unwrap();
+    assert_eq!(table(&s, r["handle"].as_str().unwrap()).row_grow, cadcraft_engine::doc::RowGrow::Fixed);
+}

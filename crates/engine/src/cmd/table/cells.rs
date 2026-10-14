@@ -195,11 +195,11 @@ fn recalc_tables_of(d: &mut Drawing, style: &str) {
         .collect();
     let st = d.table_styles.iter().find(|s| s.name.eq_ignore_ascii_case(style)).cloned().unwrap_or_default();
     for h in hs {
-        let _ = d.modify_entity(h, |e| {
-            if let EntityKind::Table(t) = &mut e.kind {
-                formula::recalc(t, &st);
-            }
-        });
+        let Some(EntityKind::Table(mut t)) = d.entity(h).map(|e| e.kind.clone()) else { continue };
+        formula::recalc(&mut t, &st);
+        // The style's text heights and margins changed: so do the heights the rows need.
+        super::fit_rows(d, &mut t);
+        let _ = d.modify_entity(h, |e| e.kind = EntityKind::Table(t));
     }
 }
 

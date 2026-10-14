@@ -963,6 +963,12 @@ pub struct Table {
     /// The CSV file the cells come from (DATALINK).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_link: Option<crate::DataLink>,
+    /// How rows grow to fit their text.
+    #[serde(default, skip_serializing_if = "crate::RowGrow::is_free")]
+    pub row_grow: crate::RowGrow,
+    /// The heights the rows were given, when some grew for their text; empty: as drawn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub row_min: Vec<f64>,
 }
 fn default_text_h() -> f64 {
     0.18

@@ -45,6 +45,8 @@ pub struct TableText {
     pub text: String,
     /// The width the text wraps at (the cell's inside its margins); 0: no wrapping.
     pub width: f64,
+    /// The cell's margin across the text (above and below it).
+    pub pad: f64,
 }
 
 /// A cell's block, placed in the cell.
@@ -179,6 +181,8 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
         header: false,
         breaks: None,
         data_link: None,
+        row_grow: t.row_grow,
+        row_min: Vec::new(),
     }
 }
 
@@ -368,6 +372,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
             style: cs.text_style.clone(),
             text: cell.text.clone(),
             width: (along - 2.0 * mh).max(0.0),
+            pad: mv,
         });
     }
     g
@@ -402,6 +407,46 @@ fn style_ink(c: Color, table: Ink) -> Ink {
     }
 }
 
+/// The heights the rows of table `t` need for their text, for [`Table::fit_rows`]: each
+/// row's own cells, and (first row, rows, height) of cells merged over several rows. Text
+/// running across the row counts; vertical text wraps along the row instead.
+pub fn table_row_needs(d: &Drawing, t: &Table) -> (Vec<f64>, Vec<(usize, usize, f64)>) {
+    let mut needs = vec![0.0; t.row_heights.len().min(10_000)];
+    let mut spans = Vec::new();
+    for tx in &layout(d, t).texts {
+        if tx.rotation.sin().abs() > 0.5 {
+            continue;
+        }
+        let need = text_layout(d, tx).bounds.height() + 2.0 * tx.pad;
+        if !need.is_finite() {
+            continue;
+        }
+        let rows = t.cells.get(tx.row).and_then(|r| r.get(tx.col)).and_then(|c| c.merged).map_or(1, |(rs, _)| rs.max(1) as usize);
+        if rows > 1 {
+            spans.push((tx.row, rows, need));
+        } else if let Some(n) = needs.get_mut(tx.row) {
+            *n = f64::max(*n, need);
+        }
+    }
+    (needs, spans)
+}
+
+/// A cell's text laid out as MTEXT (`\P`, `{\Q15;…}`, `\F…;`) at the cell's alignment
+/// point (its numbering is MTEXT's attachment), in its text style's font.
+fn text_layout(d: &Drawing, tx: &TableText) -> cadcraft_fonts::MTextLayout {
+    let ts = crate::text_style(d, &tx.style);
+    let mp = cadcraft_fonts::MTextParams {
+        attach: tx.attach,
+        width: tx.width,
+        rotation: tx.rotation,
+        font: cadcraft_fonts::TextFont::resolve(&ts.font),
+        width_factor: ts.width_factor,
+        oblique: ts.oblique,
+        ..cadcraft_fonts::MTextParams::new(tx.at, tx.height)
+    };
+    cadcraft_fonts::layout_mtext_with(&tx.text, &mp)
+}
+
 /// Draw a table into the display list.
 pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, e: &cadcraft_doc::Entity, t: &Table, rgb: Ink, lw: f32) {
     let g = table_geometry(ctx.d, t);
@@ -426,20 +471,7 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, e: &cadcraft_doc::Entity, t: &Tab
         return;
     }
     for tx in &g.texts {
-        let ts = crate::text_style(ctx.d, &tx.style);
-        let font = cadcraft_fonts::TextFont::resolve(&ts.font);
-        // Cell content is MTEXT (`\P`, `{\Q15;…}`, `\F…;`): laid out as such, at the cell's
-        // alignment point (its numbering is MTEXT's attachment).
-        let mp = cadcraft_fonts::MTextParams {
-            attach: tx.attach,
-            width: tx.width,
-            rotation: tx.rotation,
-            font,
-            width_factor: ts.width_factor,
-            oblique: ts.oblique,
-            ..cadcraft_fonts::MTextParams::new(tx.at, tx.height)
-        };
-        let layout = cadcraft_fonts::layout_mtext_with(&tx.text, &mp);
+        let layout = text_layout(ctx.d, tx);
         for piece in &layout.pieces {
             b.shaped(ctx, style_ink(tx.color, rgb), lw, &piece.shaped);
         }

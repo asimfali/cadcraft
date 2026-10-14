@@ -1439,7 +1439,9 @@ fn dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dimensio
 }
 
 mod table;
-pub use table::{MAX_LAYOUT_CELLS, TableBlock, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_style_of};
+pub use table::{
+    MAX_LAYOUT_CELLS, TableBlock, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_row_needs, table_style_of,
+};
 
 fn table(b: &mut Builder, ctx: &Ctx, e: &Entity, t: &cadcraft_doc::Table, rgb: Ink, lw: f32) {
     table::draw(b, ctx, e, t, rgb, lw);

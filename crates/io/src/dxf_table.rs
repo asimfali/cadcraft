@@ -9,7 +9,8 @@
 
 use cadcraft_color::Color;
 use cadcraft_doc::{
-    CellBlock, CellBorder, CellEdges, CellLook, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle,
+    CellBlock, CellBorder, CellEdges, CellLook, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, RowGrow, Table, TableBreak,
+    TableStyle,
 };
 use cadcraft_dxf::Tag;
 use serde::{Deserialize, Serialize};
@@ -195,6 +196,12 @@ struct TableExtra {
     /// (row, col, look) of the cells with their own alignment, margins or text rotation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     looks: Vec<(usize, usize, CellLook)>,
+    /// How the rows grow for their text.
+    #[serde(default, skip_serializing_if = "RowGrow::is_free")]
+    grow: RowGrow,
+    /// The heights the rows were given, when some grew.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    mins: Vec<f64>,
 }
 
 /// The xdata strings of a table's extra data (marker first), or nothing for a plain table.
@@ -208,6 +215,8 @@ pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
         blocks: Vec::new(),
         edges: Vec::new(),
         looks: Vec::new(),
+        grow: t.row_grow,
+        mins: if t.row_min.len() == t.row_heights.len() { t.row_min.clone() } else { Vec::new() },
     };
     for (r, row) in t.cells.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
@@ -232,6 +241,8 @@ pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
         && x.blocks.is_empty()
         && x.edges.is_empty()
         && x.looks.is_empty()
+        && x.grow.is_free()
+        && x.mins.is_empty()
     {
         return Vec::new();
     }
@@ -269,6 +280,9 @@ pub(crate) fn read_table_xdata(tags: &[Tag], t: &mut Table) {
             cell.edges = (!e.is_empty()).then_some(e);
         }
     }
+    t.row_grow = x.grow.sanitized();
+    t.row_min =
+        if x.mins.len() == t.row_heights.len() && x.mins.iter().all(|h| h.is_finite() && *h > 0.0 && *h <= 1e9) { x.mins } else { Vec::new() };
     for (r, c, l) in x.looks {
         let l = l.sanitized();
         if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c)) {
