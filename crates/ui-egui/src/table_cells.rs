@@ -25,12 +25,52 @@ pub struct CellSel {
 }
 
 impl CellSel {
-    /// (first row, rows, first column, columns).
+    /// The cells from `anchor` to `end`: (first row, rows, first column, columns).
     pub fn range(&self) -> (usize, usize, usize, usize) {
         let (r0, r1) = (self.anchor.0.min(self.end.0), self.anchor.0.max(self.end.0));
         let (c0, c1) = (self.anchor.1.min(self.end.1), self.anchor.1.max(self.end.1));
         (r0, r1 - r0 + 1, c0, c1 - c0 + 1)
     }
+
+    /// [`Self::range`] grown to take in every merged cell it meets, as a selection of cells is.
+    pub fn range_in(&self, t: &Table) -> (usize, usize, usize, usize) {
+        merged_range(t, self.range())
+    }
+}
+
+/// `range` grown until no merged cell of `t` sticks out of it.
+pub fn merged_range(t: &Table, range: (usize, usize, usize, usize)) -> (usize, usize, usize, usize) {
+    let (mut r0, mut r1, mut c0, mut c1) = (range.0, range.0 + range.1, range.2, range.2 + range.3);
+    let merges: Vec<(usize, usize, usize, usize)> = t
+        .cells
+        .iter()
+        .enumerate()
+        .flat_map(|(r, row)| {
+            row.iter().enumerate().filter_map(move |(c, cell)| cell.merged.map(|(rs, cs)| (r, c, rs.max(1) as usize, cs.max(1) as usize)))
+        })
+        .collect();
+    // Each pass can only grow the range; a pass that doesn't ends it.
+    for _ in 0..=merges.len() {
+        let mut grew = false;
+        for &(ar, ac, rs, cs) in &merges {
+            if ar < r1 && r0 < ar + rs && ac < c1 && c0 < ac + cs {
+                let next = (r0.min(ar), r1.max(ar + rs), c0.min(ac), c1.max(ac + cs));
+                grew |= next != (r0, r1, c0, c1);
+                (r0, r1, c0, c1) = next;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    let (r1, c1) = (r1.min(t.row_heights.len()), c1.min(t.col_widths.len()));
+    (r0.min(r1), r1.saturating_sub(r0).max(1), c0.min(c1), c1.saturating_sub(c0).max(1))
+}
+
+/// Whether `a` and `b` overlap or share an edge (cells of one part of a table).
+fn touches(a: &Bounds2, b: &Bounds2) -> bool {
+    let e = 1e-9 * (1.0 + a.width().max(a.height()));
+    b.min.x <= a.max.x + e && a.min.x <= b.max.x + e && b.min.y <= a.max.y + e && a.min.y <= b.max.y + e
 }
 
 /// The table at `h`, if it still is one.
@@ -49,7 +89,23 @@ pub fn cell_inside(app: &CadApp, p: Vec2, tol: f64) -> Option<(Handle, usize, us
     for e in space.iter() {
         let EntityKind::Table(t) = &e.kind else { continue };
         let Some((r, c)) = t.cell_at_point(p) else { continue };
-        let inside = t.cell_rects(r, c).iter().any(|b| p.x >= b.min.x + tol && p.x <= b.max.x - tol && p.y >= b.min.y + tol && p.y <= b.max.y - tol);
+        // The whole merged cell around it (its inner grid lines are not drawn), in this part.
+        let Some(mut area) = t.cell_rects(r, c).into_iter().find(|b| b.contains(p)) else { continue };
+        let (r0, rows, c0, cols) = merged_range(t, (r, 1, c, 1));
+        let rects: Vec<Bounds2> =
+            (r0..r0 + rows).flat_map(|rr| (c0..c0 + cols).map(move |cc| (rr, cc))).flat_map(|(rr, cc)| t.cell_rects(rr, cc)).collect();
+        for _ in 0..rects.len().min(10_000) {
+            let before = area;
+            for b in &rects {
+                if touches(&area, b) {
+                    area = area.union(b);
+                }
+            }
+            if area == before {
+                break;
+            }
+        }
+        let inside = p.x >= area.min.x + tol && p.x <= area.max.x - tol && p.y >= area.min.y + tol && p.y <= area.max.y - tol;
         if inside {
             return Some((e.handle, r, c));
         }
@@ -105,7 +161,7 @@ pub fn paint(app: &CadApp, painter: &egui::Painter, xf: &Xf) {
     let tk = crate::theme::Tokens::get();
     let stroke = Stroke::new(2.0, tk.window_stroke);
     let fill = Color32::from_rgba_unmultiplied(tk.window_stroke.r(), tk.window_stroke.g(), tk.window_stroke.b(), 40);
-    let (r0, rows, c0, cols) = sel.range();
+    let (r0, rows, c0, cols) = sel.range_in(&t);
     for r in r0..r0 + rows {
         for c in c0..c0 + cols {
             for b in t.cell_rects(r, c) {
@@ -140,7 +196,11 @@ fn sub(label: &str, children: Vec<Entry>) -> Entry {
 /// The right-click menu's groups for the selected cells (`None` without a selection).
 pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
     let sel = app.canvas.cells?;
-    let one = sel.anchor == sel.end;
+    // One cell, or one merged cell.
+    let one = table(app, sel.table).is_some_and(|t| {
+        let (r0, rows, c0, cols) = sel.range_in(&t);
+        (rows, cols) == (1, 1) || t.cells.get(r0).and_then(|row| row.get(c0)).and_then(|c| c.merged) == Some((rows as u32, cols as u32))
+    });
     let align = [
         ("Top Left", 1),
         ("Top Center", 2),
@@ -208,7 +268,8 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
 /// Run cell action `action` (an item id without [`CELL`]) on the selected cells.
 pub fn act(app: &mut CadApp, action: &str) {
     let Some(sel) = app.canvas.cells else { return };
-    let (r0, rows, c0, cols) = sel.range();
+    let Some(t) = table(app, sel.table) else { return };
+    let (r0, rows, c0, cols) = sel.range_in(&t);
     let h = sel.table.hex();
     let range = json!({ "handle": h, "row": r0, "col": c0, "scope": "range", "rows": rows, "cols": cols });
     let with = |extra: Value| {
@@ -219,7 +280,7 @@ pub fn act(app: &mut CadApp, action: &str) {
         q
     };
     // The first cell's centre, for the commands that pick a cell.
-    let centre = table(app, sel.table).and_then(|t| t.cell_rects(r0, c0).first().map(|b| (b.min + b.max) * 0.5));
+    let centre = t.cell_rects(r0, c0).first().map(|b| (b.min + b.max) * 0.5);
     let parts: Vec<&str> = action.split(':').collect();
     let result: Result<Value, String> = match parts.as_slice() {
         ["align", a] => app.run("tableformat", with(json!({ "align": a.parse::<u8>().unwrap_or(5) }))),
@@ -256,7 +317,7 @@ pub fn act(app: &mut CadApp, action: &str) {
             last
         }
         ["merge"] => app.run("table.merge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
-        ["unmerge"] => app.run("table.unmerge", json!({ "handle": h, "row": r0, "col": c0 })),
+        ["unmerge"] => app.run("table.unmerge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
         ["row", "above"] => app.run("table.insertrow", json!({ "handle": h, "row": r0 })),
         ["row", "below"] => app.run("table.insertrow", json!({ "handle": h, "row": r0 + rows })),
         ["row", "delete"] => {
@@ -378,5 +439,31 @@ mod tests {
         assert!(a.canvas.cells.is_none());
         // Unknown actions do nothing.
         act(&mut a, "nonsense:1");
+    }
+
+    #[test]
+    fn merged_cells_are_picked_and_unmerged_whole() {
+        let (mut a, h) = app();
+        // Cells (0, 0)–(1, 1) merged: 20 × 8 at the origin.
+        a.run("table.merge", json!({ "handle": h.hex(), "row": 0, "col": 0, "rows": 2, "cols": 2 })).unwrap_or_default();
+        // A click next to the hidden inner line (x 10) is inside the merged cell, and selects it whole.
+        assert!(click(&mut a, Vec2::new(10.05, -4.05), 0.1, false));
+        let t = table(&a, h).unwrap_or_default();
+        assert_eq!(a.canvas.cells.map(|s| s.range_in(&t)), Some((0, 2, 0, 2)));
+        assert!(
+            entries(&a).is_some_and(|g| g.iter().flatten().any(|e| matches!(e, Entry::Item { id, .. } if id == "cell:edit"))),
+            "one merged cell can be edited"
+        );
+        // A range from (2, 1) up into the merge grows to take it in.
+        click(&mut a, Vec2::new(15.0, -10.0), 0.1, false);
+        click(&mut a, Vec2::new(25.0, -6.0), 0.1, true);
+        let t = table(&a, h).unwrap_or_default();
+        assert_eq!(a.canvas.cells.map(|s| s.range_in(&t)), Some((0, 3, 0, 3)));
+        // A second merge, then Unmerge on the whole table takes both apart.
+        a.run("table.merge", json!({ "handle": h.hex(), "row": 2, "col": 1, "cols": 2 })).unwrap_or_default();
+        click(&mut a, Vec2::new(5.0, -2.0), 0.1, false);
+        click(&mut a, Vec2::new(25.0, -10.0), 0.1, true);
+        act(&mut a, "unmerge");
+        assert!(cells(&a, h).iter().flatten().all(|c| c.merged.is_none()));
     }
 }

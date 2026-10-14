@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("table.insertcol", "Insert Column", run_insert_col).params("{handle, col? (insert before; default: append), width?}"),
         CommandSpec::new("table.deletecol", "Delete Column", run_delete_col).params("{handle, col}"),
         CommandSpec::new("table.merge", "Merge Cells", run_merge).params("{handle, row, col, rows, cols}"),
-        CommandSpec::new("table.unmerge", "Unmerge Cells", run_unmerge).params("{handle, row, col}"),
+        CommandSpec::new("table.unmerge", "Unmerge Cells", run_unmerge).params("{handle, row, col, rows?, cols? (every merge meeting the range)}"),
     ]
     .into_iter()
     .chain(cells::specs())
@@ -405,17 +405,25 @@ fn run_merge(s: &mut Session, p: &Value) -> Result<Value> {
         let overlaps = |&(ar, ac, ars, acs): &(usize, usize, usize, usize)| ar < r + rs && r < ar + ars && ac < c + cs && c < ac + acs;
         let mut a: Vec<_> = anchors(t).into_iter().filter(|x| !overlaps(x)).collect();
         let mut texts = Vec::new();
+        let mut block = None;
         for rr in r..r + rs {
             for cc in c..c + cs {
-                if let Some(cell) = t.cells.get_mut(rr).and_then(|row| row.get_mut(cc))
-                    && !cell.text.is_empty()
-                {
-                    texts.push(std::mem::take(&mut cell.text));
+                if let Some(cell) = t.cells.get_mut(rr).and_then(|row| row.get_mut(cc)) {
+                    if !cell.text.is_empty() {
+                        texts.push(std::mem::take(&mut cell.text));
+                    }
+                    // The first block goes to the anchor (a cell shows one block).
+                    if (rr, cc) != (r, c) && block.is_none() {
+                        block = cell.block.take();
+                    }
                 }
             }
         }
         if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c)) {
             cell.text = texts.join(" ");
+            if cell.block.is_none() && cell.text.is_empty() {
+                cell.block = block;
+            }
         }
         a.push((r, c, rs, cs));
         set_anchors(t, &a);
@@ -426,7 +434,10 @@ fn run_merge(s: &mut Session, p: &Value) -> Result<Value> {
 fn run_unmerge(s: &mut Session, p: &Value) -> Result<Value> {
     edit(s, p, "table.unmerge", |t| {
         let (r, c) = cell_at(p, t)?;
-        let a: Vec<_> = anchors(t).into_iter().filter(|&(ar, ac, rs, cs)| !(r >= ar && r < ar + rs && c >= ac && c < ac + cs)).collect();
+        // Every merge meeting the range (one cell by default).
+        let rs = usize_param(p, "rows").unwrap_or(1).max(1).min(t.cells.len() - r);
+        let cs = usize_param(p, "cols").unwrap_or(1).max(1).min(t.col_widths.len() - c);
+        let a: Vec<_> = anchors(t).into_iter().filter(|&(ar, ac, ars, acs)| !(ar < r + rs && r < ar + ars && ac < c + cs && c < ac + acs)).collect();
         set_anchors(t, &a);
         Ok(())
     })

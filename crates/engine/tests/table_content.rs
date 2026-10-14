@@ -384,3 +384,20 @@ fn tableborders_at_the_command_line() {
     assert!(s.prompting());
     s.cancel();
 }
+
+#[test]
+fn merging_keeps_a_block_and_unmerge_takes_a_range() {
+    let (mut s, h) = session();
+    s.execute("tinsert", &json!({ "handle": h, "row": 1, "col": 1, "block": "TAG" })).unwrap();
+    s.execute("table.merge", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 2 })).unwrap();
+    let t = table(&s, &h);
+    assert_eq!(t.cells[0][0].block.as_ref().map(|b| b.name.as_str()), Some("TAG"), "the block moves to the merged cell");
+    assert!(t.cells[1][1].block.is_none());
+    // Text in the anchor keeps it: no block then.
+    s.execute("table.unmerge", &json!({ "handle": h, "row": 1, "col": 1 })).unwrap();
+    assert!(table(&s, &h).cells[0][0].merged.is_none(), "any cell of a merge unmerges it");
+    s.execute("table.merge", &json!({ "handle": h, "row": 0, "col": 0, "cols": 2 })).unwrap();
+    s.execute("table.merge", &json!({ "handle": h, "row": 1, "col": 0, "cols": 2 })).unwrap();
+    s.execute("table.unmerge", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 1 })).unwrap();
+    assert!(table(&s, &h).cells.iter().flatten().all(|c| c.merged.is_none()), "every merge meeting the range");
+}
