@@ -3,6 +3,7 @@
 
 mod breaks;
 mod cells;
+mod clip;
 mod content;
 pub(crate) mod formula;
 
@@ -39,6 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
     .into_iter()
     .chain(cells::specs())
     .chain(content::specs())
+    .chain(clip::specs())
     .chain(breaks::specs())
     .collect()
 }
@@ -148,17 +150,7 @@ fn run_table(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Modify the table `handle` with `f`.
 fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std::result::Result<(), String>) -> Result<Value> {
-    let h = p
-        .get("handle")
-        .and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle)))
-        .or_else(|| {
-            s.selection().into_iter().find(|h| s.doc().ok().and_then(|d| d.entity(*h)).is_some_and(|e| matches!(e.kind, EntityKind::Table(_))))
-        })
-        .ok_or_else(|| bad(id, "`handle` of a table is required"))?;
-    let mut t = match s.doc()?.entity(h).map(|e| &e.kind) {
-        Some(EntityKind::Table(t)) => t.clone(),
-        _ => return Err(bad(id, "object is not a table")),
-    };
+    let (h, mut t) = find(s, p, id)?;
     normalize(&mut t);
     f(&mut t).map_err(|m| bad(id, m))?;
     let st = cadcraft_render::table_style_of(s.doc()?, &t);
@@ -166,6 +158,21 @@ fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std:
     fit_rows(s.doc()?, &mut t);
     s.doc_mut()?.modify_entity(h, |e| e.kind = EntityKind::Table(t))?;
     Ok(json!({ "handle": h.hex() }))
+}
+
+/// The table `handle` names (else the selected one), and a copy of it.
+fn find(s: &Session, p: &Value, id: &str) -> Result<(Handle, Table)> {
+    let h = p
+        .get("handle")
+        .and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle)))
+        .or_else(|| {
+            s.selection().into_iter().find(|h| s.doc().ok().and_then(|d| d.entity(*h)).is_some_and(|e| matches!(e.kind, EntityKind::Table(_))))
+        })
+        .ok_or_else(|| bad(id, "`handle` of a table is required"))?;
+    match s.doc()?.entity(h).map(|e| &e.kind) {
+        Some(EntityKind::Table(t)) => Ok((h, t.clone())),
+        _ => Err(bad(id, "object is not a table")),
+    }
 }
 
 /// `rowGrow`: "free", "fixed" or a step (a number more than 0).

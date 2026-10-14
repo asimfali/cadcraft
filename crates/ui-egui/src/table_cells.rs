@@ -185,6 +185,117 @@ pub fn paint(app: &CadApp, painter: &egui::Painter, xf: &Xf) {
     }
 }
 
+/// A grid line of a table: the right edge of a column or the bottom edge of a row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GridLine {
+    Col(usize),
+    Row(usize),
+}
+
+/// A grid line being dragged to `at` (x for a column's edge, y for a row's).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineDrag {
+    pub table: Handle,
+    pub line: GridLine,
+    pub at: f64,
+}
+
+/// Where the column edges (x) and row edges (y) of an unbroken table are.
+fn grid(t: &Table) -> Option<(Vec<f64>, Vec<f64>)> {
+    if t.is_broken() || t.col_widths.is_empty() || t.row_heights.is_empty() {
+        return None;
+    }
+    let o = t.insert.xy();
+    let xs = t.col_widths.iter().scan(o.x, |x, w| {
+        *x += w;
+        Some(*x)
+    });
+    let ys = t.row_heights.iter().scan(o.y, |y, h| {
+        *y -= h;
+        Some(*y)
+    });
+    Some((xs.collect(), ys.collect()))
+}
+
+/// The grid line of the picked cells' table within `tol` of `p` (the nearest), that a drag
+/// resizes: a column's right edge or a row's bottom edge.
+pub fn line_at(app: &CadApp, p: Vec2, tol: f64) -> Option<(Handle, GridLine)> {
+    let sel = app.canvas.cells?;
+    let t = table(app, sel.table)?;
+    let (xs, ys) = grid(&t)?;
+    let o = t.insert.xy();
+    let (x1, y1) = (xs.last().copied()?, ys.last().copied()?);
+    let within_x = p.x >= o.x - tol && p.x <= x1 + tol;
+    let within_y = p.y <= o.y + tol && p.y >= y1 - tol;
+    let near =
+        |v: &[f64], at: f64| v.iter().enumerate().map(|(i, x)| (i, (x - at).abs())).filter(|(_, d)| *d <= tol).min_by(|a, b| a.1.total_cmp(&b.1));
+    let col = near(&xs, p.x).filter(|_| within_y);
+    let row = near(&ys, p.y).filter(|_| within_x);
+    let line = match (col, row) {
+        (Some(c), Some(r)) if r.1 < c.1 => GridLine::Row(r.0),
+        (Some(c), _) => GridLine::Col(c.0),
+        (None, Some(r)) => GridLine::Row(r.0),
+        (None, None) => return None,
+    };
+    Some((sel.table, line))
+}
+
+/// Start dragging the grid line at `p`, if there is one.
+pub fn start_line_drag(app: &mut CadApp, p: Vec2, tol: f64) -> bool {
+    let Some((table, line)) = line_at(app, p, tol) else { return false };
+    let at = match line {
+        GridLine::Col(_) => p.x,
+        GridLine::Row(_) => p.y,
+    };
+    app.canvas.line_drag = Some(LineDrag { table, line, at });
+    true
+}
+
+/// The column width or row height a dragged line gives (more than 0), with the cell it is of.
+fn dragged_size(t: &Table, d: &LineDrag) -> Option<(usize, usize, f64)> {
+    let (xs, ys) = grid(t)?;
+    let o = t.insert.xy();
+    let (r, c, size) = match d.line {
+        GridLine::Col(c) => (0, c, d.at - if c == 0 { o.x } else { *xs.get(c - 1)? }),
+        GridLine::Row(r) => (r, 0, if r == 0 { o.y } else { *ys.get(r - 1)? } - d.at),
+    };
+    // At least a hundredth of the table's text height, never past its far side.
+    let min = (t.text_height * 0.01).max(1e-6);
+    (size.is_finite()).then_some((r, c, size.max(min)))
+}
+
+/// Let go of a dragged grid line: TABLESIZE gives its column the new width or its row the new
+/// height (the rest of the table moves along; rows still grow for their text).
+pub fn end_line_drag(app: &mut CadApp) {
+    let Some(d) = app.canvas.line_drag.take() else { return };
+    let Some(t) = table(app, d.table) else { return };
+    let Some((r, c, size)) = dragged_size(&t, &d) else { return };
+    let key = if matches!(d.line, GridLine::Col(_)) { "width" } else { "height" };
+    if let Err(e) = app.run("tablesize", json!({ "handle": d.table.hex(), "row": r, "col": c, key: size })) {
+        app.session.echo(e);
+    }
+}
+
+/// The dragged grid line, across the table, with its new size by it.
+pub fn paint_line_drag(app: &CadApp, painter: &egui::Painter, xf: &Xf) {
+    let Some(d) = app.canvas.line_drag else { return };
+    let Some(t) = table(app, d.table) else { return };
+    let Some((xs, ys)) = grid(&t) else { return };
+    let o = t.insert.xy();
+    let (Some(x1), Some(y1)) = (xs.last().copied(), ys.last().copied()) else { return };
+    let (a, b) = match d.line {
+        GridLine::Col(_) => (Vec2::new(d.at, o.y), Vec2::new(d.at, y1)),
+        GridLine::Row(_) => (Vec2::new(o.x, d.at), Vec2::new(x1, d.at)),
+    };
+    let tk = crate::theme::Tokens::get();
+    let (sa, sb) = (xf.to_screen(a), xf.to_screen(b));
+    painter.extend(egui::Shape::dashed_line(&[sa, sb], Stroke::new(1.5, tk.window_stroke), 6.0, 4.0));
+    if let Some((_, _, size)) = dragged_size(&t, &d) {
+        let text = format!("{size:.2}").trim_end_matches('0').trim_end_matches('.').to_string();
+        painter.text(sa + egui::vec2(6.0, -6.0), egui::Align2::LEFT_BOTTOM, text, egui::FontId::proportional(13.0), tk.window_stroke);
+    }
+}
+
 fn item(label: &str, id: String) -> Entry {
     Entry::Item { label: label.into(), id, shortcut: None, enabled: true }
 }
@@ -263,6 +374,10 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
     if one {
         cell.insert(0, item("Edit Text", format!("{CELL}edit")));
     }
+    let mut clip = vec![item("Cut", format!("{CELL}cut")), item("Copy", format!("{CELL}copy"))];
+    if app.session.cell_clipboard.is_some() {
+        clip.push(item("Paste", format!("{CELL}paste")));
+    }
     let content = vec![item("Insert Block...", format!("{CELL}block")), item("Delete Content", format!("{CELL}delete"))];
     let merge = vec![item("Merge Cells", format!("{CELL}merge")), item("Unmerge Cells", format!("{CELL}unmerge"))];
     let rows = vec![
@@ -275,7 +390,7 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         item("Insert Right", format!("{CELL}col:right")),
         item("Delete Columns", format!("{CELL}col:delete")),
     ];
-    Some(vec![cell, content, merge, vec![sub("Rows", rows), sub("Columns", cols)]])
+    Some(vec![clip, cell, content, merge, vec![sub("Rows", rows), sub("Columns", cols)]])
 }
 
 /// Run cell action `action` (an item id without [`CELL`]) on the selected cells.
@@ -344,15 +459,18 @@ pub fn act(app: &mut CadApp, action: &str) {
             Ok(v) => app.run("tableformat", with(json!({ "textHeight": v }))),
             Err(_) => Ok(Value::Null),
         },
-        ["delete"] => {
-            let mut last = Ok(Value::Null);
-            for r in r0..r0 + rows {
-                for c in c0..c0 + cols {
-                    let _ = app.run("tinsert", json!({ "handle": h, "row": r, "col": c, "block": "" }));
-                    last = app.run("table.set", json!({ "handle": h, "row": r, "col": c, "text": "" }));
-                }
-            }
-            last
+        ["delete"] => app.run("table.clearcells", range.clone()),
+        ["copy"] => {
+            copy(app, false);
+            Ok(Value::Null)
+        }
+        ["cut"] => {
+            copy(app, true);
+            Ok(Value::Null)
+        }
+        ["paste"] => {
+            paste(app, None);
+            Ok(Value::Null)
         }
         ["merge"] => app.run("table.merge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
         ["unmerge"] => app.run("table.unmerge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
@@ -380,6 +498,39 @@ pub fn act(app: &mut CadApp, action: &str) {
     };
     if let Err(e) = result {
         app.session.echo(e);
+    }
+    validate(app);
+}
+
+/// Copy the picked cells (and empty them for `cut`); their text goes on the system clipboard.
+pub fn copy(app: &mut CadApp, cut: bool) {
+    let Some(sel) = app.canvas.cells else { return };
+    let Some(t) = table(app, sel.table) else { return };
+    let (r0, rows, c0, cols) = sel.range_in(&t);
+    let p = json!({ "handle": sel.table.hex(), "row": r0, "col": c0, "rows": rows, "cols": cols, "cut": cut });
+    match app.run("table.copycells", p) {
+        Ok(v) => app.canvas.cell_text = v.get("text").and_then(Value::as_str).map(str::to_string),
+        Err(e) => app.session.echo(e),
+    }
+    validate(app);
+}
+
+/// Paste into the picked cells: `text` from another program (tab-separated rows), else the
+/// copied cells. The pasted cells become the picked ones.
+pub fn paste(app: &mut CadApp, text: Option<&str>) {
+    let Some(sel) = app.canvas.cells else { return };
+    let Some(t) = table(app, sel.table) else { return };
+    let (r0, rows, c0, cols) = sel.range_in(&t);
+    let mut p = json!({ "handle": sel.table.hex(), "row": r0, "col": c0, "rows": rows, "cols": cols });
+    if let Some(text) = text {
+        p["text"] = json!(text);
+    }
+    match app.run("table.pastecells", p) {
+        Ok(v) => {
+            let n = |k: &str| v.get(k).and_then(Value::as_u64).and_then(|x| usize::try_from(x).ok()).unwrap_or(1).max(1);
+            app.canvas.cells = Some(CellSel { table: sel.table, anchor: (r0, c0), end: (r0 + n("rows") - 1, c0 + n("cols") - 1) });
+        }
+        Err(e) => app.session.echo(e),
     }
     validate(app);
 }
@@ -575,5 +726,62 @@ mod tests {
         let _ = a.session.input(cadcraft_engine::Input::Text("5".into()));
         assert!(!a.session.prompting());
         assert!(table(&a, h).is_some_and(|t| t.row_grow == cadcraft_engine::doc::RowGrow::Step(5.0)));
+    }
+
+    #[test]
+    fn picked_cells_copy_paste_and_delete() {
+        let (mut a, h) = app();
+        let _ = a.run("table.set", json!({ "handle": h.hex(), "row": 0, "col": 0, "text": "x" }));
+        let _ = a.run("table.set", json!({ "handle": h.hex(), "row": 0, "col": 1, "text": "y" }));
+        click(&mut a, Vec2::new(5.0, -2.0), 0.1, false);
+        click(&mut a, Vec2::new(15.0, -2.0), 0.1, true);
+        act(&mut a, "copy");
+        assert_eq!(a.canvas.cell_text.as_deref(), Some("x\ty\n"), "for the system clipboard");
+        assert!(entries(&a).is_some_and(|g| g.iter().flatten().any(|e| matches!(e, Entry::Item { id, .. } if id == "cell:paste"))));
+        // Pasted at one cell: the copy takes its size, and becomes the picked cells.
+        click(&mut a, Vec2::new(5.0, -6.0), 0.1, false);
+        act(&mut a, "paste");
+        assert_eq!((cells(&a, h)[1][0].text.as_str(), cells(&a, h)[1][1].text.as_str()), ("x", "y"));
+        assert_eq!(a.canvas.cells.map(|c| c.range()), Some((1, 1, 0, 2)));
+        // Text from a spreadsheet.
+        click(&mut a, Vec2::new(5.0, -10.0), 0.1, false);
+        paste(&mut a, Some("1\t2\t3\n"));
+        assert_eq!(cells(&a, h)[2].iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), ["1", "2", "3"]);
+        // Delete empties the picked cells.
+        act(&mut a, "delete");
+        assert!(cells(&a, h)[2].iter().all(|c| c.text.is_empty()));
+        assert_eq!(cells(&a, h)[1][0].text, "x");
+    }
+
+    #[test]
+    fn dragging_a_grid_line_resizes_its_column_or_row() {
+        let (mut a, h) = app();
+        // No cells picked: the lines are the table's (a click there picks it).
+        assert!(line_at(&a, Vec2::new(10.0, -2.0), 0.2).is_none());
+        click(&mut a, Vec2::new(5.0, -2.0), 0.1, false);
+        assert_eq!(line_at(&a, Vec2::new(10.1, -2.0), 0.2), Some((h, GridLine::Col(0))));
+        assert_eq!(line_at(&a, Vec2::new(5.0, -3.9), 0.2), Some((h, GridLine::Row(0))));
+        assert_eq!(line_at(&a, Vec2::new(29.9, -12.0), 0.2).map(|l| l.1), Some(GridLine::Row(2)), "the corner: the nearer line");
+        assert!(line_at(&a, Vec2::new(50.0, -2.0), 0.2).is_none(), "outside the table");
+        assert!(start_line_drag(&mut a, Vec2::new(10.0, -2.0), 0.2));
+        if let Some(d) = &mut a.canvas.line_drag {
+            d.at = 14.0;
+        }
+        end_line_drag(&mut a);
+        assert!(a.canvas.line_drag.is_none());
+        assert_eq!(table(&a, h).map(|t| t.col_widths), Some(vec![14.0, 10.0, 10.0]));
+        assert!(start_line_drag(&mut a, Vec2::new(5.0, -8.0), 0.2));
+        if let Some(d) = &mut a.canvas.line_drag {
+            d.at = -15.0;
+        }
+        end_line_drag(&mut a);
+        assert_eq!(table(&a, h).map(|t| t.row_heights), Some(vec![4.0, 11.0, 4.0]));
+        // Dragged past the column's other side: the smallest width, never a negative one.
+        assert!(start_line_drag(&mut a, Vec2::new(24.0, -2.0), 0.2));
+        if let Some(d) = &mut a.canvas.line_drag {
+            d.at = -100.0;
+        }
+        end_line_drag(&mut a);
+        assert!(table(&a, h).is_some_and(|t| t.col_widths[1] > 0.0 && t.col_widths[1] < 0.1));
     }
 }

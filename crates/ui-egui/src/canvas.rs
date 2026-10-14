@@ -131,6 +131,10 @@ pub struct CanvasState {
     pub cells: Option<crate::table_cells::CellSel>,
     /// A drag across table cells is selecting them.
     pub cell_drag: bool,
+    /// Cells just copied, as text for the system clipboard (put there next frame).
+    pub cell_text: Option<String>,
+    /// A table grid line being dragged to a new column width or row height.
+    pub line_drag: Option<crate::table_cells::LineDrag>,
 }
 
 impl CanvasState {
@@ -1528,6 +1532,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             crate::dyngrips::click(app, g);
         } else if let Some(g) = grip_at(app, &xf, hover_pos) {
             click_grip(app, g, mods.shift);
+        } else if crate::table_cells::line_at(app, raw_world.unwrap_or(p), app.session.settings.pickbox.max(1.0) / scale).is_some() {
+            // A press on a grid line of the picked cells' table: dragging it resizes.
         } else if crate::table_cells::click(app, raw_world.unwrap_or(p), app.session.settings.pickbox.max(1.0) / scale, mods.shift) {
             // A click inside a table cell selects the cell.
         } else if let Err(e) = app.session.idle_click(raw_world.unwrap_or(p), mods.shift) {
@@ -1537,8 +1543,31 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Press-and-drag selection window (AutoCAD's PICKDRAG = 2; click-click still works): a drag
     // that starts while objects are being selected opens a window where the button went down,
     // and letting go closes it. Drags on grips and drags while drawing are left alone.
+    // A drag that starts on a grid line of the picked cells' table resizes its column or row.
+    let cell_tol = app.session.settings.pickbox.max(1.0) / scale;
+    if resp.drag_started_by(egui::PointerButton::Primary)
+        && !middle_down
+        && !app.session.prompting()
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && rect.contains(origin)
+        && grip_at(app, &xf, Some(origin)).is_none()
+    {
+        crate::table_cells::start_line_drag(app, xf.to_world(origin), cell_tol);
+    }
+    if let Some(d) = &mut app.canvas.line_drag {
+        if let Some(w) = raw_world {
+            d.at = match d.line {
+                crate::table_cells::GridLine::Col(_) => w.x,
+                crate::table_cells::GridLine::Row(_) => w.y,
+            };
+        }
+        if resp.drag_stopped_by(egui::PointerButton::Primary) || !ui.input(|i| i.pointer.primary_down()) {
+            crate::table_cells::end_line_drag(app);
+        }
+    }
     // A drag that starts inside a table cell (no command running) selects cells instead.
     if resp.drag_started_by(egui::PointerButton::Primary)
+        && app.canvas.line_drag.is_none()
         && !middle_down
         && !app.session.prompting()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1558,6 +1587,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     if resp.drag_started_by(egui::PointerButton::Primary)
         && !app.canvas.cell_drag
+        && app.canvas.line_drag.is_none()
         && !middle_down
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1830,6 +1860,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Selected table cells.
     crate::table_cells::validate(app);
     crate::table_cells::paint(app, &painter, &xf);
+    crate::table_cells::paint_line_drag(app, &painter, &xf);
     // Pending selection window.
     if let (Some(pw), Some(c)) = (app.session.pending_window, raw_world) {
         let a = xf.to_screen(pw.corner);
@@ -1874,6 +1905,19 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if inside {
         // Hide the OS cursor under the drawn crosshair, unless assistive tech needs it (#39).
         ui.ctx().set_cursor_icon(if app.ui.system_cursor { egui::CursorIcon::Crosshair } else { egui::CursorIcon::None });
+        // Over a grid line of the picked cells' table (or dragging one): the resize pointer.
+        let line = app.canvas.line_drag.map(|d| d.line).or_else(|| {
+            (!app.session.prompting())
+                .then_some(hover_pos)
+                .flatten()
+                .and_then(|hp| crate::table_cells::line_at(app, xf.to_world(hp), app.session.settings.pickbox.max(1.0) / xf.scale))
+                .map(|(_, l)| l)
+        });
+        match line {
+            Some(crate::table_cells::GridLine::Col(_)) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn),
+            Some(crate::table_cells::GridLine::Row(_)) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeRow),
+            None => {}
+        }
         if let Some(hp) = hover_pos {
             draw_crosshair(app, &painter, rect, hp, selecting);
         }
