@@ -1252,6 +1252,7 @@
 	Hidden	Приховано
 	As the Cell Style	Як у стилі комірки
 	Column Width and Row Height...	Ширина стовпців і висота рядків...
+	Other...	Інша...
 @plural	{n} commit	{n} коміт|{n} коміти|{n} комітів
 @plural	{n} contributor	{n} учасник|{n} учасники|{n} учасників
 	Drawing as bytes	Креслення як байти

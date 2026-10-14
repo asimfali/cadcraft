@@ -1033,6 +1033,7 @@
 	Hidden	Скрыть
 	As the Cell Style	Как в стиле ячейки
 	Column Width and Row Height...	Ширина столбцов и высота строк...
+	Other...	Другая...
 @plural	{n} commit	{n} коммит|{n} коммита|{n} коммитов
 @plural	{n} contributor	{n} участник|{n} участника|{n} участников
 	Drawing as bytes	Чертеж как байты

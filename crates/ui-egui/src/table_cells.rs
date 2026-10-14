@@ -219,6 +219,9 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         .into_iter()
         .map(|(l, r)| item(l, format!("{CELL}rotate:{r}")))
         .collect();
+    // GOST 2.304's text heights, then one typed at the command line.
+    let mut heights: Vec<Entry> = ["1.8", "2.5", "3.5", "5", "7", "10", "14"].iter().map(|h| item(h, format!("{CELL}height:{h}"))).collect();
+    heights.push(item("Other...", format!("{CELL}height:other")));
     let weights = |edges: &str| -> Vec<Entry> {
         let mut v: Vec<Entry> =
             ["0.18", "0.25", "0.35", "0.5", "0.7", "1.0"].iter().map(|w| item(&format!("{w} mm"), format!("{CELL}borders:{edges}:{w}"))).collect();
@@ -244,6 +247,7 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
     let mut cell = vec![
         sub("Alignment", align),
         sub("Borders", borders),
+        sub("Text Height", heights),
         sub("Text Rotation", rotation),
         item("Column Width and Row Height...", format!("{CELL}size")),
         item("Remove Formatting", format!("{CELL}clearformat")),
@@ -308,20 +312,18 @@ pub fn act(app: &mut CadApp, action: &str) {
             Ok(Value::Null)
         }
         ["size"] => {
-            // TABLESIZE with the selection picked: its first cell, then the range to its last.
-            let last = t.cell_rects(r0 + rows - 1, c0 + cols - 1).first().map(|b| (b.min + b.max) * 0.5);
-            start_at(app, "tablesize", centre);
-            let inputs = match last {
-                Some(p) if rows > 1 || cols > 1 => vec![cadcraft_engine::Input::Keyword("rAnge".into()), cadcraft_engine::Input::Point(p)],
-                _ => vec![cadcraft_engine::Input::Enter],
-            };
-            for i in inputs {
-                if let Err(e) = app.session.input(i) {
-                    app.session.echo(e.to_string());
-                }
-            }
+            start_picked(app, "tablesize", &t, (r0, rows, c0, cols), &[]);
             Ok(Value::Null)
         }
+        // TABLEFORMAT with the selection picked and the alignment kept: it asks for the height.
+        ["height", "other"] => {
+            start_picked(app, "tableformat", &t, (r0, rows, c0, cols), &[cadcraft_engine::Input::Enter]);
+            Ok(Value::Null)
+        }
+        ["height", hgt] => match hgt.parse::<f64>() {
+            Ok(v) => app.run("tableformat", with(json!({ "textHeight": v }))),
+            Err(_) => Ok(Value::Null),
+        },
         ["delete"] => {
             let mut last = Ok(Value::Null);
             for r in r0..r0 + rows {
@@ -360,6 +362,24 @@ pub fn act(app: &mut CadApp, action: &str) {
         app.session.echo(e);
     }
     validate(app);
+}
+
+/// Start command `id` (one that picks cells, see the engine's TABLEFORMAT) with the cells of
+/// `range` picked: its first cell, then the range to its last one; then `more` inputs.
+fn start_picked(app: &mut CadApp, id: &str, t: &Table, range: (usize, usize, usize, usize), more: &[cadcraft_engine::Input]) {
+    let (r0, rows, c0, cols) = range;
+    let centre = |r: usize, c: usize| t.cell_rects(r, c).first().map(|b| (b.min + b.max) * 0.5);
+    start_at(app, id, centre(r0, c0));
+    let mut inputs = match centre(r0 + rows - 1, c0 + cols - 1) {
+        Some(p) if rows > 1 || cols > 1 => vec![cadcraft_engine::Input::Keyword("rAnge".into()), cadcraft_engine::Input::Point(p)],
+        _ => vec![cadcraft_engine::Input::Enter],
+    };
+    inputs.extend(more.iter().cloned());
+    for i in inputs {
+        if let Err(e) = app.session.input(i) {
+            app.session.echo(e.to_string());
+        }
+    }
 }
 
 /// Start command `id` and give it the point `at` (the cell it asks for first).
@@ -497,5 +517,27 @@ mod tests {
         let t = table(&a, h).unwrap_or_default();
         assert_eq!(t.col_widths, vec![10.0, 25.0, 25.0]);
         assert_eq!(t.row_heights, vec![4.0, 4.0, 4.0]);
+    }
+
+    #[test]
+    fn the_menu_sets_the_text_height_of_the_selection() {
+        let (mut a, h) = app();
+        click(&mut a, Vec2::new(5.0, -2.0), 0.1, false);
+        click(&mut a, Vec2::new(25.0, -2.0), 0.1, true);
+        act(&mut a, "height:2.5");
+        let t = table(&a, h).unwrap_or_default();
+        assert!(t.cells[0].iter().all(|c| c.text_height == Some(2.5)));
+        assert!(t.cells[1].iter().all(|c| c.text_height.is_none()));
+        // Other...: the command asks for the height, the alignment kept.
+        act(&mut a, "height:other");
+        assert!(a.session.prompting());
+        let _ = a.session.input(cadcraft_engine::Input::Text("7".into()));
+        let _ = a.session.input(cadcraft_engine::Input::Enter);
+        let _ = a.session.input(cadcraft_engine::Input::Enter);
+        assert!(!a.session.prompting());
+        assert!(table(&a, h).is_some_and(|t| t.cells[0].iter().all(|c| c.text_height == Some(7.0))));
+        // Remove Formatting goes back to the style's height.
+        act(&mut a, "clearformat");
+        assert!(table(&a, h).is_some_and(|t| t.cells.iter().flatten().all(|c| c.text_height.is_none())));
     }
 }

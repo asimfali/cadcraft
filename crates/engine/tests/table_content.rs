@@ -315,6 +315,7 @@ fn cellformat_at_the_command_line() {
     s.cmdline("15,-2").unwrap();
     s.cmdline("o").unwrap();
     s.cmdline("mr").unwrap();
+    s.cmdline("").unwrap();
     s.cmdline("1.5").unwrap();
     s.cmdline("").unwrap();
     assert!(!s.prompting());
@@ -330,10 +331,33 @@ fn cellformat_at_the_command_line() {
     s.cmdline("a").unwrap();
     s.cmdline("15,-2").unwrap();
     s.cmdline("tc").unwrap();
+    s.cmdline("2.5").unwrap();
     s.cmdline("").unwrap();
     s.cmdline("90").unwrap();
     let t = table(&s, &h);
     assert!(t.cells.iter().flatten().all(|c| c.look.is_some_and(|l| l.align == Some(2) && l.rotation == Some(90))));
+    assert!(t.cells.iter().flatten().all(|c| c.text_height == Some(2.5)));
+}
+
+#[test]
+fn a_cells_text_height_is_drawn_and_kept() {
+    let (mut s, h) = session();
+    s.execute("table.set", &json!({ "handle": h, "row": 0, "col": 0, "text": "A" })).unwrap();
+    s.execute("table.set", &json!({ "handle": h, "row": 1, "col": 0, "text": "B" })).unwrap();
+    s.execute("tableformat", &json!({ "handle": h, "row": 0, "col": 0, "textHeight": 2.5 })).unwrap();
+    let t = table(&s, &h);
+    let g = render::table_geometry(s.doc().unwrap(), &t);
+    let height = |x: &str| g.texts.iter().find(|t| t.text == x).unwrap().height;
+    assert_eq!(height("A"), 2.5);
+    assert_ne!(height("B"), 2.5, "the other cell keeps its style's height");
+    let back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    let t2 = back.model.iter().find_map(|e| if let EntityKind::Table(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    assert_eq!(t2.cells[0][0].text_height, Some(2.5));
+    for bad in [json!(0), json!(-1), json!("big"), json!(1e300)] {
+        assert!(s.execute("tableformat", &json!({ "handle": h, "row": 0, "col": 0, "textHeight": bad })).is_err(), "{bad}");
+    }
+    s.execute("tableformat", &json!({ "handle": h, "row": 0, "col": 0, "clear": true })).unwrap();
+    assert_eq!(table(&s, &h).cells[0][0].text_height, None);
 }
 
 #[test]
