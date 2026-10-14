@@ -1,6 +1,7 @@
 //! What table cells hold beyond text: TINSERT puts a block in a cell (with attribute values and
-//! a dynamic block's visibility state); `table.cellborders` gives cells their own borders and
-//! `table.cellformat` their own alignment, margins and text rotation.
+//! a dynamic block's visibility state); TABLEBORDERS gives cells their own borders and
+//! TABLEFORMAT their own alignment, margins and text rotation. At the command line both pick a
+//! cell and what it stands for (the cell, its column, its row, the table, or a range).
 
 use std::collections::BTreeMap;
 
@@ -17,7 +18,7 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 const TINSERT_PARAMS: &str = "{handle?, row+col | at: [x,y], block: name (\"\" removes the block), scale?: number | \"fit\" (default fit), \
      rotation?: degrees, attribs?: {TAG: value}, props?: {Visibility1: state}} → {handle}";
 
-const BORDERS_PARAMS: &str = "{handle?, row, col, rows? (default 1), cols? (default 1), \
+const BORDERS_PARAMS: &str = "{handle?, row+col | at: [x,y], scope?: cell|column|row|table|range (default range: rows, cols), rows? (default 1), cols? (default 1), \
      edges?: all|outside|inside|top|bottom|left|right|insideH|insideV or a list (default all), \
      visible?: bool, color?, lineweight? (mm or ByBlock/ByLayer), clear?: bool (back to the cell style)} → {handle}";
 
@@ -30,8 +31,12 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("tinsert", "Insert Block in Table Cell", run_tinsert)
             .params(TINSERT_PARAMS)
             .interactive(|_| Ok(Box::new(TinsertM::default()))),
-        CommandSpec::new("table.cellborders", "Set Table Cell Borders", run_borders).params(BORDERS_PARAMS),
-        CommandSpec::new("table.cellformat", "Format Table Cells", run_format)
+        CommandSpec::new("tableborders", "Set Table Cell Borders", run_borders)
+            .alias(&["tbo"])
+            .params(BORDERS_PARAMS)
+            .interactive(|_| Ok(Box::new(BordersM::default()))),
+        CommandSpec::new("tableformat", "Format Table Cells", run_format)
+            .alias(&["tfo"])
             .params(FORMAT_PARAMS)
             .interactive(|_| Ok(Box::new(FormatM::default()))),
     ]
@@ -214,16 +219,19 @@ fn edge_set(v: Option<&Value>) -> std::result::Result<[bool; 6], String> {
 }
 
 fn run_borders(s: &mut Session, p: &Value) -> Result<Value> {
-    let which = edge_set(p.get("edges")).map_err(|m| bad("table.cellborders", m))?;
+    let q = target(s, p, "tableborders")?;
+    let p = &q;
+    let which = edge_set(p.get("edges")).map_err(|m| bad("tableborders", m))?;
+    let scope = str_param(p, "scope").unwrap_or("range").to_string();
     let clear = p.get("clear").and_then(Value::as_bool).unwrap_or(false);
     let mut border = CellBorder::default();
     if !clear {
-        apply_border(&mut border, p).map_err(|m| bad("table.cellborders", m))?;
+        apply_border(&mut border, p).map_err(|m| bad("tableborders", m))?;
     }
-    edit(s, p, "table.cellborders", |t| {
-        let (r0, c0) = cell_at(p, t)?;
-        let rows = usize_param(p, "rows").unwrap_or(1).max(1).min(t.cells.len() - r0);
-        let cols = usize_param(p, "cols").unwrap_or(1).max(1).min(t.col_widths.len() - c0);
+    edit(s, p, "tableborders", |t| {
+        let (r, c) = cell_at(p, t)?;
+        // Borders of a column or the table take in the title and header rows too.
+        let (r0, rows, c0, cols) = scope_cells(t, &scope, r, c, usize_param(p, "rows").unwrap_or(1), usize_param(p, "cols").unwrap_or(1), true)?;
         let [top, bottom, left, right, inside_h, inside_v] = which;
         let value = (!clear).then_some(border);
         for r in r0..r0 + rows {
@@ -254,9 +262,18 @@ fn run_borders(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Which cells a scope covers, from cell (`r`, `c`): (first row, rows, first column, columns).
 /// Column, row and table scopes cover data rows only (below the title and header rows).
-fn scope_cells(t: &Table, scope: &str, r: usize, c: usize, rows: usize, cols: usize) -> std::result::Result<(usize, usize, usize, usize), String> {
+/// With `labels`, column and table scopes take in the title and header rows too.
+fn scope_cells(
+    t: &Table,
+    scope: &str,
+    r: usize,
+    c: usize,
+    rows: usize,
+    cols: usize,
+    labels: bool,
+) -> std::result::Result<(usize, usize, usize, usize), String> {
     let (nr, nc) = (t.cells.len(), t.col_widths.len());
-    let data = (usize::from(t.title) + usize::from(t.header)).min(nr);
+    let data = if labels { 0 } else { (usize::from(t.title) + usize::from(t.header)).min(nr) };
     Ok(match scope.trim().to_ascii_lowercase().as_str() {
         "" | "cell" => (r, 1, c, 1),
         "column" | "col" => (data, nr - data, c, 1),
@@ -293,17 +310,17 @@ fn look_param(p: &Value) -> std::result::Result<CellLook, String> {
 }
 
 fn run_format(s: &mut Session, p: &Value) -> Result<Value> {
-    let q = target(s, p, "table.cellformat")?;
+    let q = target(s, p, "tableformat")?;
     let clear = q.get("clear").and_then(Value::as_bool).unwrap_or(false);
-    let set = look_param(&q).map_err(|m| bad("table.cellformat", m))?;
+    let set = look_param(&q).map_err(|m| bad("tableformat", m))?;
     if !clear && set.is_empty() {
-        return Err(bad("table.cellformat", "nothing to set: give align, margin, marginH, marginV or rotation (or clear)"));
+        return Err(bad("tableformat", "nothing to set: give align, margin, marginH, marginV or rotation (or clear)"));
     }
     let scope = str_param(&q, "scope").unwrap_or("cell").to_string();
     let mut n = 0usize;
-    let r = edit(s, &q, "table.cellformat", |t| {
+    let r = edit(s, &q, "tableformat", |t| {
         let (r, c) = cell_at(&q, t)?;
-        let (r0, rows, c0, cols) = scope_cells(t, &scope, r, c, usize_param(&q, "rows").unwrap_or(1), usize_param(&q, "cols").unwrap_or(1))?;
+        let (r0, rows, c0, cols) = scope_cells(t, &scope, r, c, usize_param(&q, "rows").unwrap_or(1), usize_param(&q, "cols").unwrap_or(1), false)?;
         for r in r0..r0 + rows {
             for c in c0..c0 + cols {
                 let (ar, ac) = anchor_of(t, r, c);
@@ -322,50 +339,99 @@ fn run_format(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handle": r["handle"], "cells": n }))
 }
 
-/// The steps of `table.cellformat` at the command line.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum FormatStep {
-    #[default]
-    Cell,
-    Scope,
-    Corner,
-    Align,
-    Margin,
-    Rotation,
+/// Picking cells at the command line: a cell, what it stands for (the cell, its column, its row,
+/// the table, or a range to a second cell).
+#[derive(Default)]
+struct CellPick {
+    cell: Option<(Handle, usize, usize)>,
+    scope: Option<String>,
+    corner: Option<(usize, usize)>,
 }
 
-/// `table.cellformat` at the command line: pick a cell, choose what it stands for (the cell, its
-/// column, its row, the table, or a range to a second cell), then the alignment, margin and
-/// rotation (Enter keeps each as it is).
-#[derive(Default)]
-struct FormatM {
-    step: FormatStep,
-    cell: Option<(Handle, usize, usize)>,
-    scope: String,
-    corner: Option<(usize, usize)>,
-    params: serde_json::Map<String, Value>,
+/// Where a [`CellPick`] is after an input.
+enum Picked {
+    Asking,
+    Done,
+    Cancel,
 }
 
 const SCOPES: &[&str] = &["Cell", "cOlumn", "Row", "Table", "rAnge"];
-const ALIGNS: &[&str] = &["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"];
-const ROTATIONS: &[&str] = &["0", "90", "180", "270"];
 
-impl FormatM {
-    /// Apply what was chosen; `Done` when it worked, else report and finish.
-    fn apply(&mut self, s: &mut Session) -> Result<Step> {
-        let Some((h, r, c)) = self.cell else { return Ok(Step::Cancel) };
-        let mut q = self.params.clone();
+impl CellPick {
+    /// The prompt while picking, or `None` once picked.
+    fn prompt(&self) -> Option<Prompt> {
+        match (&self.cell, self.scope.as_deref()) {
+            (None, _) => Some(Prompt::new("Pick a table cell", Accept::POINT)),
+            (Some(_), None) => Some(Prompt::new("Apply to", Accept::TEXT).kw(SCOPES).default("Cell")),
+            (Some(_), Some("range")) if self.corner.is_none() => Some(Prompt::new("Pick the opposite cell of the range", Accept::POINT)),
+            _ => None,
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Picked {
+        match (&self.cell, self.scope.as_deref(), i) {
+            (_, _, Input::Cancel) | (None, _, Input::Enter) => return Picked::Cancel,
+            (None, _, Input::Point(p)) => match cell_under(s, p) {
+                Some(c) => self.cell = Some(c),
+                None => s.echo("No table cell there."),
+            },
+            (Some(_), None, Input::Enter) => self.scope = Some("cell".into()),
+            (Some(_), None, Input::Keyword(k) | Input::Text(k)) => {
+                let k = k.trim().to_ascii_lowercase();
+                let scope = match k.as_str() {
+                    "o" => Some("column"),
+                    "a" => Some("range"),
+                    _ => ["cell", "column", "row", "table", "range"].into_iter().find(|x| !k.is_empty() && x.starts_with(&k)),
+                };
+                match scope {
+                    Some(sc) => self.scope = Some(sc.into()),
+                    None => s.echo("Choose Cell, cOlumn, Row, Table or rAnge."),
+                }
+            }
+            (Some((h, ..)), Some("range"), Input::Point(p)) => match cell_under(s, p) {
+                Some((h2, r2, c2)) if h2 == *h => self.corner = Some((r2, c2)),
+                _ => s.echo("Pick a cell of the same table."),
+            },
+            _ => {}
+        }
+        if self.prompt().is_none() { Picked::Done } else { Picked::Asking }
+    }
+    /// The picked cells as command parameters: handle, row, col, scope (and rows, cols).
+    fn params(&self) -> serde_json::Map<String, Value> {
+        let mut q = serde_json::Map::new();
+        let Some((h, r, c)) = self.cell else { return q };
+        let (r0, c0) = self.corner.map_or((r, c), |(r2, c2)| (r.min(r2), c.min(c2)));
         q.insert("handle".into(), json!(h.hex()));
-        q.insert("row".into(), json!(r.min(self.corner.map_or(r, |x| x.0))));
-        q.insert("col".into(), json!(c.min(self.corner.map_or(c, |x| x.1))));
-        q.insert("scope".into(), json!(self.scope));
+        q.insert("row".into(), json!(r0));
+        q.insert("col".into(), json!(c0));
+        q.insert("scope".into(), json!(self.scope.clone().unwrap_or_else(|| "cell".into())));
         if let Some((r2, c2)) = self.corner {
             q.insert("rows".into(), json!(r.abs_diff(r2) + 1));
             q.insert("cols".into(), json!(c.abs_diff(c2) + 1));
         }
+        q
+    }
+}
+
+/// TABLEFORMAT at the command line: pick the cells, then the alignment, margin and rotation
+/// (Enter keeps each as it is).
+#[derive(Default)]
+struct FormatM {
+    pick: CellPick,
+    /// 0 alignment, 1 margin, 2 rotation.
+    step: u8,
+    params: serde_json::Map<String, Value>,
+}
+
+const ALIGNS: &[&str] = &["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"];
+const ROTATIONS: &[&str] = &["0", "90", "180", "270"];
+
+impl FormatM {
+    fn apply(&mut self, s: &mut Session) -> Result<Step> {
         if self.params.is_empty() {
             return Ok(Step::Done);
         }
+        let mut q = self.pick.params();
+        q.extend(self.params.clone());
         if let Err(e) = run_format(s, &Value::Object(q)) {
             s.echo(e.to_string());
         }
@@ -375,86 +441,142 @@ impl FormatM {
 
 impl Interactive for FormatM {
     fn name(&self) -> &'static str {
-        "TABLE.CELLFORMAT"
+        "TABLEFORMAT"
     }
     fn prompt(&self, _s: &Session) -> Prompt {
+        if let Some(p) = self.pick.prompt() {
+            return p;
+        }
         match self.step {
-            FormatStep::Cell => Prompt::new("Pick a table cell", Accept::POINT),
-            FormatStep::Scope => Prompt::new("Format", Accept::TEXT).kw(SCOPES).default("Cell"),
-            FormatStep::Corner => Prompt::new("Pick the opposite cell of the range", Accept::POINT),
-            FormatStep::Align => Prompt::new("Alignment (Enter: keep)", Accept::TEXT).kw(ALIGNS),
-            FormatStep::Margin => Prompt::new("Margin from the cell's sides (Enter: keep)", Accept::NUMBER),
-            FormatStep::Rotation => Prompt::new("Text rotation (Enter: keep)", Accept::TEXT).kw(ROTATIONS),
+            0 => Prompt::new("Alignment (Enter: keep)", Accept::TEXT).kw(ALIGNS),
+            1 => Prompt::new("Margin from the cell's sides (Enter: keep)", Accept::NUMBER),
+            _ => Prompt::new("Text rotation (Enter: keep)", Accept::TEXT).kw(ROTATIONS),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
-        if matches!(i, Input::Cancel) {
-            return Ok(Step::Cancel);
+        if self.pick.prompt().is_some() {
+            return Ok(match self.pick.input(s, i) {
+                Picked::Cancel => Step::Cancel,
+                _ => Step::Continue,
+            });
         }
         match (self.step, i) {
-            (FormatStep::Cell, Input::Point(p)) => match cell_under(s, p) {
-                Some(c) => {
-                    self.cell = Some(c);
-                    self.step = FormatStep::Scope;
-                }
-                None => s.echo("No table cell there."),
-            },
-            (FormatStep::Cell, Input::Enter) => return Ok(Step::Cancel),
-            (FormatStep::Scope, Input::Enter) => {
-                self.scope = "cell".into();
-                self.step = FormatStep::Align;
-            }
-            (FormatStep::Scope, Input::Keyword(k) | Input::Text(k)) => {
-                let k = k.trim().to_ascii_lowercase();
-                let scope = ["cell", "column", "row", "table", "range"]
-                    .into_iter()
-                    .find(|x| x.starts_with(&k) || (k == "o" && *x == "column") || (k == "a" && *x == "range"));
-                match scope {
-                    Some(sc) => {
-                        self.scope = sc.into();
-                        self.step = if sc == "range" { FormatStep::Corner } else { FormatStep::Align };
-                    }
-                    None => s.echo("Choose Cell, cOlumn, Row, Table or rAnge."),
-                }
-            }
-            (FormatStep::Corner, Input::Point(p)) => match (cell_under(s, p), self.cell) {
-                (Some((h2, r2, c2)), Some((h, ..))) if h2 == h => {
-                    self.corner = Some((r2, c2));
-                    self.step = FormatStep::Align;
-                }
-                _ => s.echo("Pick a cell of the same table."),
-            },
-            (FormatStep::Align, Input::Enter) => self.step = FormatStep::Margin,
-            (FormatStep::Align, Input::Keyword(k) | Input::Text(k)) => match align_value(&json!(k)) {
+            (_, Input::Cancel) => return Ok(Step::Cancel),
+            (2, Input::Enter) => return self.apply(s),
+            (_, Input::Enter) => self.step += 1,
+            (0, Input::Keyword(k) | Input::Text(k)) => match align_value(&json!(k)) {
                 Some(a) => {
                     self.params.insert("align".into(), json!(a));
-                    self.step = FormatStep::Margin;
+                    self.step = 1;
                 }
                 None => s.echo("Choose TL, TC, TR, ML, MC, MR, BL, BC or BR."),
             },
-            (FormatStep::Margin, Input::Enter) => self.step = FormatStep::Rotation,
-            (FormatStep::Margin, Input::Text(t) | Input::Keyword(t)) => {
-                match t.trim().parse::<f64>().ok().filter(|m| m.is_finite() && (0.0..=1e9).contains(m)) {
-                    Some(m) => {
-                        self.params.insert("marginH".into(), json!(m));
-                        self.step = FormatStep::Rotation;
-                    }
-                    None => s.echo("The margin is a distance of 0 or more."),
+            (1, Input::Keyword(t) | Input::Text(t)) => match t.trim().parse::<f64>().ok().filter(|m| m.is_finite() && (0.0..=1e9).contains(m)) {
+                Some(m) => {
+                    self.params.insert("marginH".into(), json!(m));
+                    self.step = 2;
                 }
-            }
-            (FormatStep::Rotation, Input::Enter) => return self.apply(s),
-            (FormatStep::Rotation, Input::Keyword(k) | Input::Text(k)) => {
-                match k.trim().parse::<u16>().ok().filter(|r| [0, 90, 180, 270].contains(r)) {
-                    Some(r) => {
-                        self.params.insert("rotation".into(), json!(r));
-                        return self.apply(s);
-                    }
-                    None => s.echo("Choose 0, 90, 180 or 270."),
+                None => s.echo("The margin is a distance of 0 or more."),
+            },
+            (_, Input::Keyword(k) | Input::Text(k)) => match k.trim().parse::<u16>().ok().filter(|r| [0, 90, 180, 270].contains(r)) {
+                Some(r) => {
+                    self.params.insert("rotation".into(), json!(r));
+                    return self.apply(s);
                 }
-            }
+                None => s.echo("Choose 0, 90, 180 or 270."),
+            },
             _ => {}
         }
         Ok(Step::Continue)
+    }
+}
+
+/// TABLEBORDERS at the command line: pick the cells, which of their edges, then the lineweight
+/// (millimetres, ByBlock, or Clear to go back to the cell style).
+#[derive(Default)]
+struct BordersM {
+    pick: CellPick,
+    edges: Option<String>,
+}
+
+const EDGES: &[&str] = &["All", "Outside", "Inside", "Top", "Bottom", "Left", "Right", "insideH", "insideV"];
+
+impl Interactive for BordersM {
+    fn name(&self) -> &'static str {
+        "TABLEBORDERS"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if let Some(p) = self.pick.prompt() {
+            return p;
+        }
+        match self.edges {
+            None => Prompt::new("Edges", Accept::TEXT).kw(EDGES).default("All"),
+            Some(_) => Prompt::new("Lineweight in mm, ByBlock or Clear", Accept::TEXT).kw(&["Byblock", "Clear"]).default("0.5"),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if self.pick.prompt().is_some() {
+            return Ok(match self.pick.input(s, i) {
+                Picked::Cancel => Step::Cancel,
+                _ => Step::Continue,
+            });
+        }
+        if matches!(i, Input::Cancel) {
+            return Ok(Step::Cancel);
+        }
+        let Some(edges) = self.edges.clone() else {
+            let k = match i {
+                Input::Enter => "all".to_string(),
+                Input::Keyword(k) | Input::Text(k) => k.trim().to_ascii_lowercase(),
+                _ => return Ok(Step::Continue),
+            };
+            let name = match k.as_str() {
+                "a" => Some("all"),
+                "o" => Some("outside"),
+                "i" => Some("inside"),
+                "t" => Some("top"),
+                "b" => Some("bottom"),
+                "l" => Some("left"),
+                "r" => Some("right"),
+                "h" => Some("insideH"),
+                "v" => Some("insideV"),
+                _ => EDGES.iter().copied().find(|e| e.eq_ignore_ascii_case(&k)),
+            };
+            match name {
+                Some(n) => self.edges = Some(n.to_string()),
+                None => s.echo("Choose All, Outside, Inside, Top, Bottom, Left, Right, insideH or insideV."),
+            }
+            return Ok(Step::Continue);
+        };
+        let v = match i {
+            Input::Enter => "0.5".to_string(),
+            Input::Keyword(k) | Input::Text(k) => k.trim().to_ascii_lowercase(),
+            _ => return Ok(Step::Continue),
+        };
+        let mut q = self.pick.params();
+        q.insert("edges".into(), json!(edges));
+        match v.as_str() {
+            "c" | "clear" => {
+                q.insert("clear".into(), json!(true));
+            }
+            "b" | "byblock" => {
+                q.insert("lineweight".into(), json!("ByBlock"));
+            }
+            mm => match mm.trim_end_matches("mm").trim().parse::<f64>() {
+                Ok(w) => {
+                    q.insert("lineweight".into(), json!(w));
+                }
+                Err(_) => {
+                    s.echo("Type a lineweight in millimetres (0.18, 0.5, 1), ByBlock or Clear.");
+                    return Ok(Step::Continue);
+                }
+            },
+        }
+        if let Err(e) = run_borders(s, &Value::Object(q)) {
+            s.echo(e.to_string());
+            return Ok(Step::Continue);
+        }
+        Ok(Step::Done)
     }
 }
 

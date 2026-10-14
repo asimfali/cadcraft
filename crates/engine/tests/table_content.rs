@@ -102,7 +102,7 @@ fn hostile_tinsert_params_never_panic() {
         json!({ "handle": h, "row": 0, "col": 0, "rows": u64::MAX, "cols": u64::MAX, "edges": ["all"], "lineweight": 99 }),
     ] {
         let _ = s.execute("tinsert", &p);
-        let _ = s.execute("table.cellborders", &p);
+        let _ = s.execute("tableborders", &p);
     }
     let t = table(&s, &h);
     let _ = render::table_geometry(s.doc().unwrap(), &t);
@@ -113,10 +113,10 @@ fn cell_borders_override_the_style_and_the_heavier_wins() {
     let (mut s, h) = session();
     // The whole table's outline heavy, the top row's bottom thin: on the edge between the rows
     // the second row's top (not set) leaves the first row's thin bottom.
-    s.execute("table.cellborders", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 2, "edges": "outside", "lineweight": 0.5 })).unwrap();
-    s.execute("table.cellborders", &json!({ "handle": h, "row": 0, "col": 0, "cols": 2, "edges": "bottom", "lineweight": 0.18 })).unwrap();
+    s.execute("tableborders", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 2, "edges": "outside", "lineweight": 0.5 })).unwrap();
+    s.execute("tableborders", &json!({ "handle": h, "row": 0, "col": 0, "cols": 2, "edges": "bottom", "lineweight": 0.18 })).unwrap();
     // The lower left cell's top heavier than the upper left cell's bottom: it wins there.
-    s.execute("table.cellborders", &json!({ "handle": h, "row": 1, "col": 0, "edges": "top", "lineweight": 0.7 })).unwrap();
+    s.execute("tableborders", &json!({ "handle": h, "row": 1, "col": 0, "edges": "top", "lineweight": 0.7 })).unwrap();
     let t = table(&s, &h);
     let g = render::table_geometry(s.doc().unwrap(), &t);
     // The lineweights of the horizontal segments at height `y` overlapping x0..x1.
@@ -131,7 +131,7 @@ fn cell_borders_override_the_style_and_the_heavier_wins() {
     assert_eq!(at(-4.0, 0.0, 10.0), [Lineweight::Mm100(70)], "middle, left");
     assert_eq!(at(-4.0, 10.0, 20.0), [Lineweight::Mm100(18)], "middle, right");
     // Clearing goes back to the cell style.
-    s.execute("table.cellborders", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 2, "clear": true })).unwrap();
+    s.execute("tableborders", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 2, "clear": true })).unwrap();
     assert!(table(&s, &h).cells.iter().flatten().all(|c| c.edges.is_none()));
 }
 
@@ -139,7 +139,7 @@ fn cell_borders_override_the_style_and_the_heavier_wins() {
 fn block_cells_and_borders_survive_dxf() {
     let (mut s, h) = session();
     s.execute("tinsert", &json!({ "handle": h, "row": 0, "col": 0, "block": "TAG", "attribs": { "NUMBER": "12" } })).unwrap();
-    s.execute("table.cellborders", &json!({ "handle": h, "row": 1, "col": 1, "edges": "left", "lineweight": 0.5, "color": 1 })).unwrap();
+    s.execute("tableborders", &json!({ "handle": h, "row": 1, "col": 1, "edges": "left", "lineweight": 0.5, "color": 1 })).unwrap();
     s.execute("table.set", &json!({ "handle": h, "row": 1, "col": 0, "text": "a long text that wraps in its cell" })).unwrap();
     let d = s.doc().unwrap();
     let dxf = cadcraft_io::write_dxf(d);
@@ -269,9 +269,9 @@ fn a_columns_alignment_and_margin_override_the_cell_style() {
         .unwrap()
         .to_string();
     // Column 0's data rows: middle centre; column 1's: middle right, 2 from the right side.
-    let r = s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 0, "scope": "column", "align": "MC" })).unwrap();
+    let r = s.execute("tableformat", &json!({ "handle": h, "row": 1, "col": 0, "scope": "column", "align": "MC" })).unwrap();
     assert_eq!(r["cells"], 2);
-    s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 1, "scope": "column", "align": "MR", "marginH": 2.0 })).unwrap();
+    s.execute("tableformat", &json!({ "handle": h, "row": 1, "col": 1, "scope": "column", "align": "MR", "marginH": 2.0 })).unwrap();
     let t = table(&s, &h);
     assert!(t.cells[0][0].look.is_none(), "the header row keeps its style");
     let g = render::table_geometry(s.doc().unwrap(), &t);
@@ -284,7 +284,7 @@ fn a_columns_alignment_and_margin_override_the_cell_style() {
     assert_eq!(a.attach, 6);
     assert!((a.at.x - 18.0).abs() < 1e-9, "{:?}", a.at);
     // Clearing goes back to the style.
-    s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 0, "scope": "table", "clear": true })).unwrap();
+    s.execute("tableformat", &json!({ "handle": h, "row": 1, "col": 0, "scope": "table", "clear": true })).unwrap();
     assert!(table(&s, &h).cells.iter().flatten().all(|c| c.look.is_none()));
 }
 
@@ -292,7 +292,7 @@ fn a_columns_alignment_and_margin_override_the_cell_style() {
 fn vertical_header_text_reads_upwards_and_wraps_along_the_cell_height() {
     let (mut s, h) = session();
     s.execute("table.set", &json!({ "handle": h, "row": 0, "col": 0, "text": "Format" })).unwrap();
-    s.execute("table.cellformat", &json!({ "handle": h, "row": 0, "col": 0, "align": "MC", "rotation": 90 })).unwrap();
+    s.execute("tableformat", &json!({ "handle": h, "row": 0, "col": 0, "align": "MC", "rotation": 90 })).unwrap();
     let t = table(&s, &h);
     let g = render::table_geometry(s.doc().unwrap(), &t);
     let x = g.texts.iter().find(|x| x.text == "Format").unwrap();
@@ -310,7 +310,7 @@ fn vertical_header_text_reads_upwards_and_wraps_along_the_cell_height() {
 #[test]
 fn cellformat_at_the_command_line() {
     let (mut s, h) = session();
-    s.cmdline("table.cellformat").unwrap();
+    s.cmdline("tableformat").unwrap();
     // Cell (0, 1): x 10..20, y 0..-4; its column, middle right, margin 1.5, no rotation change.
     s.cmdline("15,-2").unwrap();
     s.cmdline("o").unwrap();
@@ -325,7 +325,7 @@ fn cellformat_at_the_command_line() {
     }
     assert!(t.cells[0][0].look.is_none());
     // A range by its two corners.
-    s.cmdline("table.cellformat").unwrap();
+    s.cmdline("tableformat").unwrap();
     s.cmdline("5,-6").unwrap();
     s.cmdline("a").unwrap();
     s.cmdline("15,-2").unwrap();
@@ -348,9 +348,39 @@ fn bad_cellformat_parameters_are_refused() {
         json!({ "handle": h, "row": 7, "col": 0, "align": "MC" }),
         json!({ "handle": h, "row": 0, "col": 0, "align": "MC", "scope": "range", "rows": u64::MAX, "cols": u64::MAX, "rotation": u64::MAX }),
     ] {
-        assert!(s.execute("table.cellformat", &p).is_err(), "{p}");
+        assert!(s.execute("tableformat", &p).is_err(), "{p}");
     }
-    let r =
-        s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 1, "align": 5, "scope": "range", "rows": u64::MAX, "cols": u64::MAX }));
+    let r = s.execute("tableformat", &json!({ "handle": h, "row": 1, "col": 1, "align": 5, "scope": "range", "rows": u64::MAX, "cols": u64::MAX }));
     assert_eq!(r.unwrap()["cells"], 1, "a range is cut at the table's edge");
+}
+
+#[test]
+fn tableborders_at_the_command_line() {
+    let (mut s, h) = session();
+    // The whole table's outline at 1 mm, typed by alias; then column 1's left edge cleared.
+    s.cmdline("tbo").unwrap();
+    s.cmdline("5,-2").unwrap();
+    s.cmdline("t").unwrap();
+    s.cmdline("o").unwrap();
+    s.cmdline("1").unwrap();
+    assert!(!s.prompting());
+    let t = table(&s, &h);
+    let top = |r: usize, c: usize| t.cells[r][c].edges.and_then(|e| e.top).map(|b| b.lineweight);
+    assert_eq!(top(0, 0), Some(Lineweight::Mm100(100)));
+    assert_eq!(top(1, 0), None, "inside edges keep the style");
+    assert_eq!(t.cells[1][1].edges.and_then(|e| e.right).map(|b| b.lineweight), Some(Lineweight::Mm100(100)));
+    s.cmdline("tableborders").unwrap();
+    s.cmdline("15,-2").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("l").unwrap();
+    s.cmdline("c").unwrap();
+    assert!(table(&s, &h).cells[0][1].edges.and_then(|e| e.left).is_none());
+    // A bad lineweight asks again.
+    s.cmdline("tableborders").unwrap();
+    s.cmdline("15,-2").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("thick").unwrap();
+    assert!(s.prompting());
+    s.cancel();
 }
