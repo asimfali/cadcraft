@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use cadcraft_color::Color;
-use cadcraft_doc::{CellBorder, CellStyle, Drawing, Lineweight, Table, TableStyle};
+use cadcraft_doc::{CellBlock, CellBorder, CellStyle, CellVisibility, Drawing, Lineweight, PlacedCellBlock, Table, TableStyle, heavier};
 use cadcraft_geom::Vec2;
 
 use crate::{Builder, Ctx, Ink, ink};
@@ -41,6 +41,16 @@ pub struct TableText {
     pub color: Color,
     pub style: String,
     pub text: String,
+    /// The width the text wraps at (the cell's inside its margins); 0: no wrapping.
+    pub width: f64,
+}
+
+/// A cell's block, placed in the cell.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableBlock {
+    pub row: usize,
+    pub col: usize,
+    pub block: PlacedCellBlock,
 }
 
 /// Everything a table draws, in world coordinates.
@@ -49,6 +59,7 @@ pub struct TableGeom {
     pub fills: Vec<TableFill>,
     pub lines: Vec<TableLine>,
     pub texts: Vec<TableText>,
+    pub blocks: Vec<TableBlock>,
 }
 
 /// Which cells are covered by a merge (and so not drawn on their own).
@@ -124,9 +135,13 @@ pub fn table_geometry(d: &Drawing, t: &Table) -> TableGeom {
         for tx in &mut pg.texts {
             tx.row = p.rows.get(tx.row).copied().unwrap_or(tx.row);
         }
+        for bl in &mut pg.blocks {
+            bl.row = p.rows.get(bl.row).copied().unwrap_or(bl.row);
+        }
         g.fills.extend(pg.fills);
         g.lines.extend(pg.lines);
         g.texts.extend(pg.texts);
+        g.blocks.extend(pg.blocks);
     }
     g
 }
@@ -237,6 +252,13 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
     let own = |r: usize, c: usize| owner.get(r * cols + c).copied().filter(|x| *x != usize::MAX);
     let style_of = |a: Option<usize>| a.and_then(|a| anchors.get(a)).and_then(|a| styles.get(a.style));
     let same_style = |a: Option<usize>, b: Option<usize>| matches!((a.and_then(|a| anchors.get(a)), b.and_then(|b| anchors.get(b))), (Some(x), Some(y)) if x.style == y.style);
+    // A cell's own borders: of the anchor cell of a merge.
+    let edges = |a: Option<usize>| a.and_then(|a| anchors.get(a)).and_then(|a| t.cells.get(a.row).and_then(|r| r.get(a.col))).and_then(|c| c.edges);
+    // Two cells' own borders on the edge they share: the heavier wins.
+    let either = |a: Option<CellBorder>, b: Option<CellBorder>| match (a, b) {
+        (Some(a), Some(b)) => Some(heavier(a, b)),
+        (a, b) => a.or(b),
+    };
     // Fills first, under the borders and texts.
     for a in &anchors {
         let Some(cs) = styles.get(a.style) else { continue };
@@ -273,6 +295,8 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
                 (Some(a), Some(b)) => Some(CellBorder { visible: a.borders.bottom.visible && b.borders.top.visible, ..b.borders.top }),
                 (None, None) => None,
             };
+            let own_border = either(edges(above).and_then(|e| e.bottom), edges(below).and_then(|e| e.top));
+            let br = own_border.or(br);
             push(&mut g, p(x_at(c), y_at(i)), p(x_at(c + 1), y_at(i)), br);
         }
     }
@@ -290,12 +314,29 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
                 (Some(a), Some(b)) => Some(CellBorder { visible: a.borders.right.visible && b.borders.left.visible, ..b.borders.left }),
                 (None, None) => None,
             };
+            let own_border = either(edges(left).and_then(|e| e.right), edges(right).and_then(|e| e.left));
+            let br = own_border.or(br);
             push(&mut g, p(x_at(j), y_at(r)), p(x_at(j), y_at(r + 1)), br);
         }
     }
-    // Texts at their alignment point inside the margins.
+    // Blocks, fitted in their cells (one visibility look-up per block and state).
+    let mut shown: HashMap<(String, Vec<(String, String)>), CellVisibility> = HashMap::new();
+    let mut visibility = |cb: &CellBlock| -> CellVisibility {
+        let key = (cb.name.to_ascii_lowercase(), cb.props.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect());
+        shown.entry(key).or_insert_with(|| cadcraft_doc::cell_visibility(d, cb)).clone()
+    };
     for a in &anchors {
-        let Some(cell) = t.cells.get(a.row).and_then(|row| row.get(a.col)).filter(|c| !c.text.is_empty()) else { continue };
+        let Some(cb) = t.cells.get(a.row).and_then(|row| row.get(a.col)).and_then(|c| c.block.as_ref()) else { continue };
+        let Some(cs) = styles.get(a.style) else { continue };
+        let (x0, x1, y0, y1) = (x_at(a.col), x_at(a.col + a.cols), y_at(a.row), y_at(a.row + a.rows));
+        let (min, max) = (p(x0, y1), p(x1, y0));
+        if let Some(block) = cadcraft_doc::place_cell_block(d, cb, visibility(cb), min, max, Vec2::new(cs.margin_h, cs.margin_v), cs.align) {
+            g.blocks.push(TableBlock { row: a.row, col: a.col, block });
+        }
+    }
+    // Texts at their alignment point inside the margins (a cell with a block shows the block).
+    for a in &anchors {
+        let Some(cell) = t.cells.get(a.row).and_then(|row| row.get(a.col)).filter(|c| !c.text.is_empty() && c.block.is_none()) else { continue };
         let Some(cs) = styles.get(a.style) else { continue };
         let (x0, x1, y0, y1) = (x_at(a.col), x_at(a.col + a.cols), y_at(a.row), y_at(a.row + a.rows));
         let attach = cs.align.clamp(1, 9);
@@ -318,6 +359,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
             color: cs.text_color,
             style: cs.text_style.clone(),
             text: cell.text.clone(),
+            width: (x1 - x0 - 2.0 * cs.margin_h).max(0.0),
         });
     }
     g
@@ -332,7 +374,7 @@ fn style_ink(c: Color, table: Ink) -> Ink {
 }
 
 /// Draw a table into the display list.
-pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
+pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, e: &cadcraft_doc::Entity, t: &Table, rgb: Ink, lw: f32) {
     let g = table_geometry(ctx.d, t);
     if b.opts.fill {
         for f in &g.fills {
@@ -348,6 +390,9 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
         };
         b.polyline(ctx, style_ink(l.color, rgb), w, &[l.a, l.b]);
     }
+    for bl in &g.blocks {
+        crate::insert_shown(b, ctx, e, &bl.block.insert, rgb, Some(&bl.block.visibility));
+    }
     if !b.opts.text {
         return;
     }
@@ -358,6 +403,7 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
         // alignment point (its numbering is MTEXT's attachment).
         let mp = cadcraft_fonts::MTextParams {
             attach: tx.attach,
+            width: tx.width,
             font,
             width_factor: ts.width_factor,
             oblique: ts.oblique,

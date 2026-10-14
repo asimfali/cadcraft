@@ -3,6 +3,7 @@
 
 mod breaks;
 mod cells;
+mod content;
 pub(crate) mod formula;
 
 pub(crate) use cells::{recalc, tablestyle_cell_style};
@@ -37,6 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
     .into_iter()
     .chain(cells::specs())
+    .chain(content::specs())
     .chain(breaks::specs())
     .collect()
 }

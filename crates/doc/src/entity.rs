@@ -927,6 +927,12 @@ pub struct TableCell {
     /// `None`: its cell style's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_height: Option<f64>,
+    /// A block shown in the cell instead of its text (TINSERT).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<crate::CellBlock>,
+    /// The cell's own borders, over its cell style's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<crate::CellEdges>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

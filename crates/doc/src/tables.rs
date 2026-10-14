@@ -636,8 +636,10 @@ impl Default for TableStyle {
     }
 }
 
+mod cellcontent;
 mod cellstyle;
 mod tablebreak;
+pub use cellcontent::*;
 pub use cellstyle::*;
 pub use tablebreak::*;
 

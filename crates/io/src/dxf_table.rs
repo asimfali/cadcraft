@@ -8,7 +8,9 @@
 //! row and cell styles and the formulas go into CADCraft xdata (`TABLEX`, JSON).
 
 use cadcraft_color::Color;
-use cadcraft_doc::{CellBorder, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle};
+use cadcraft_doc::{
+    CellBlock, CellBorder, CellEdges, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle,
+};
 use cadcraft_dxf::Tag;
 use serde::{Deserialize, Serialize};
 
@@ -184,19 +186,39 @@ struct TableExtra {
     /// The data link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     link: Option<DataLink>,
+    /// (row, col, block) of the cells showing a block.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    blocks: Vec<(usize, usize, CellBlock)>,
+    /// (row, col, borders) of the cells with borders of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    edges: Vec<(usize, usize, CellEdges)>,
 }
 
 /// The xdata strings of a table's extra data (marker first), or nothing for a plain table.
 pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
-    let mut x = TableExtra { v: 1, rows: t.row_styles.clone(), cells: Vec::new(), breaks: t.breaks.clone(), link: t.data_link.clone() };
+    let mut x = TableExtra {
+        v: 1,
+        rows: t.row_styles.clone(),
+        cells: Vec::new(),
+        breaks: t.breaks.clone(),
+        link: t.data_link.clone(),
+        blocks: Vec::new(),
+        edges: Vec::new(),
+    };
     for (r, row) in t.cells.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
             if !cell.style.is_empty() || cell.formula.is_some() {
                 x.cells.push((r, c, cell.style.clone(), cell.formula.clone()));
             }
+            if let Some(b) = &cell.block {
+                x.blocks.push((r, c, b.clone()));
+            }
+            if let Some(e) = cell.edges.filter(|e| !e.is_empty()) {
+                x.edges.push((r, c, e));
+            }
         }
     }
-    if x.rows.is_empty() && x.cells.is_empty() && x.breaks.is_none() && x.link.is_none() {
+    if x.rows.is_empty() && x.cells.is_empty() && x.breaks.is_none() && x.link.is_none() && x.blocks.is_empty() && x.edges.is_empty() {
         return Vec::new();
     }
     let Ok(json) = serde_json::to_string(&x) else { return Vec::new() };
@@ -220,6 +242,19 @@ pub(crate) fn read_table_xdata(tags: &[Tag], t: &mut Table) {
         b
     });
     t.data_link = x.link.filter(|l| !l.path.trim().is_empty() && l.path.len() <= 4096);
+    for (r, c, b) in x.blocks {
+        let b = b.sanitized();
+        if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c))
+            && !b.name.is_empty()
+        {
+            cell.block = Some(b);
+        }
+    }
+    for (r, c, e) in x.edges {
+        if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c)) {
+            cell.edges = (!e.is_empty()).then_some(e);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -86,7 +86,7 @@ fn lineweight_value(v: &Value) -> Option<Lineweight> {
     }
 }
 
-fn apply_border(b: &mut CellBorder, v: &Value) -> std::result::Result<(), String> {
+pub(super) fn apply_border(b: &mut CellBorder, v: &Value) -> std::result::Result<(), String> {
     if let Some(on) = v.as_bool() {
         b.visible = on;
         return Ok(());
@@ -398,7 +398,7 @@ fn run_recalc(s: &mut Session, p: &Value) -> Result<Value> {
 // ---------------------------------------------------------------- TABLEDIT
 
 /// The table and cell (row, col) under `p` in the current space.
-fn cell_under(s: &Session, p: Vec2) -> Option<(Handle, usize, usize)> {
+pub(super) fn cell_under(s: &Session, p: Vec2) -> Option<(Handle, usize, usize)> {
     let d = s.doc().ok()?;
     let space = d.space(&s.space())?;
     for e in space.iter() {
