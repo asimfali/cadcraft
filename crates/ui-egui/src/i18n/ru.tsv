@@ -721,6 +721,7 @@
 	Set Table Cell	Задать ячейку таблицы
 	Insert Block in Table Cell	Вставить блок в ячейку таблицы
 	Format Table Cells	Форматировать ячейки таблицы
+	Table Column Width and Row Height	Ширина столбца и высота строки таблицы
 	Set Table Cell Borders	Задать границы ячеек таблицы
 	Set Variable	Задать переменную
 	Set View	Задать вид
@@ -1031,6 +1032,7 @@
 	Right Border	Правая граница
 	Hidden	Скрыть
 	As the Cell Style	Как в стиле ячейки
+	Column Width and Row Height...	Ширина столбцов и высота строк...
 @plural	{n} commit	{n} коммит|{n} коммита|{n} коммитов
 @plural	{n} contributor	{n} участник|{n} участника|{n} участников
 	Drawing as bytes	Чертеж как байты

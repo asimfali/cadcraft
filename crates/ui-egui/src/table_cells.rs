@@ -245,6 +245,7 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         sub("Alignment", align),
         sub("Borders", borders),
         sub("Text Rotation", rotation),
+        item("Column Width and Row Height...", format!("{CELL}size")),
         item("Remove Formatting", format!("{CELL}clearformat")),
     ];
     if one {
@@ -304,6 +305,21 @@ pub fn act(app: &mut CadApp, action: &str) {
         }
         ["block"] => {
             start_at(app, "tinsert", centre);
+            Ok(Value::Null)
+        }
+        ["size"] => {
+            // TABLESIZE with the selection picked: its first cell, then the range to its last.
+            let last = t.cell_rects(r0 + rows - 1, c0 + cols - 1).first().map(|b| (b.min + b.max) * 0.5);
+            start_at(app, "tablesize", centre);
+            let inputs = match last {
+                Some(p) if rows > 1 || cols > 1 => vec![cadcraft_engine::Input::Keyword("rAnge".into()), cadcraft_engine::Input::Point(p)],
+                _ => vec![cadcraft_engine::Input::Enter],
+            };
+            for i in inputs {
+                if let Err(e) = app.session.input(i) {
+                    app.session.echo(e.to_string());
+                }
+            }
             Ok(Value::Null)
         }
         ["delete"] => {
@@ -465,5 +481,21 @@ mod tests {
         click(&mut a, Vec2::new(25.0, -10.0), 0.1, true);
         act(&mut a, "unmerge");
         assert!(cells(&a, h).iter().flatten().all(|c| c.merged.is_none()));
+    }
+
+    #[test]
+    fn the_size_item_asks_for_the_widths_and_heights_of_the_selection() {
+        let (mut a, h) = app();
+        click(&mut a, Vec2::new(15.0, -2.0), 0.1, false);
+        click(&mut a, Vec2::new(25.0, -6.0), 0.1, true);
+        act(&mut a, "size");
+        // Range (0..2, 1..3) picked: the command asks for the width, then the height.
+        assert!(a.session.prompting());
+        let _ = a.session.input(cadcraft_engine::Input::Text("25".into()));
+        let _ = a.session.input(cadcraft_engine::Input::Enter);
+        assert!(!a.session.prompting());
+        let t = table(&a, h).unwrap_or_default();
+        assert_eq!(t.col_widths, vec![10.0, 25.0, 25.0]);
+        assert_eq!(t.row_heights, vec![4.0, 4.0, 4.0]);
     }
 }

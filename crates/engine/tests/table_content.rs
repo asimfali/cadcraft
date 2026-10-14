@@ -401,3 +401,32 @@ fn merging_keeps_a_block_and_unmerge_takes_a_range() {
     s.execute("table.unmerge", &json!({ "handle": h, "row": 0, "col": 0, "rows": 2, "cols": 1 })).unwrap();
     assert!(table(&s, &h).cells.iter().flatten().all(|c| c.merged.is_none()), "every merge meeting the range");
 }
+
+#[test]
+fn tablesize_sets_widths_and_heights() {
+    let (mut s, h) = session();
+    // All the column widths at once (an ESKD header's, say), then one row's height.
+    s.execute("tablesize", &json!({ "handle": h, "widths": [20, 8] })).unwrap();
+    s.execute("tablesize", &json!({ "handle": h, "row": 1, "col": 0, "scope": "row", "height": 15 })).unwrap();
+    let t = table(&s, &h);
+    assert_eq!((t.col_widths.clone(), t.row_heights.clone()), (vec![20.0, 8.0], vec![4.0, 15.0]));
+    // At the command line: pick a cell, its column, width 12, height kept.
+    s.cmdline("tsi").unwrap();
+    s.cmdline("25,-2").unwrap();
+    s.cmdline("o").unwrap();
+    s.cmdline("12").unwrap();
+    s.cmdline("").unwrap();
+    assert!(!s.prompting());
+    assert_eq!(table(&s, &h).col_widths, vec![20.0, 12.0]);
+    for p in [
+        json!({ "handle": h }),
+        json!({ "handle": h, "widths": [1, 2, 3] }),
+        json!({ "handle": h, "widths": [0] }),
+        json!({ "handle": h, "widths": "wide" }),
+        json!({ "handle": h, "row": 0, "col": 0, "width": -5 }),
+        json!({ "handle": h, "row": 0, "col": 0, "height": 1e300 }),
+        json!({ "handle": h, "row": 9, "col": 0, "width": 5 }),
+    ] {
+        assert!(s.execute("tablesize", &p).is_err(), "{p}");
+    }
+}

@@ -427,6 +427,7 @@
 	Insert Table Formula	Вставити формулу в таблицю
 	Insert Block in Table Cell	Вставити блок у комірку таблиці
 	Format Table Cells	Форматувати комірки таблиці
+	Table Column Width and Row Height	Ширина стовпця і висота рядка таблиці
 	Set Table Cell Borders	Задати межі комірок таблиці
 	Insertion	Точка вставлення
 	Insertion X	Вставлення X
@@ -1250,6 +1251,7 @@
 	Right Border	Права межа
 	Hidden	Приховано
 	As the Cell Style	Як у стилі комірки
+	Column Width and Row Height...	Ширина стовпців і висота рядків...
 @plural	{n} commit	{n} коміт|{n} коміти|{n} комітів
 @plural	{n} contributor	{n} учасник|{n} учасники|{n} учасників
 	Drawing as bytes	Креслення як байти
