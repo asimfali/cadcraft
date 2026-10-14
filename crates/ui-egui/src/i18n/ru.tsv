@@ -993,6 +993,44 @@
 	−Bin	−двоич.
 	−LOC	−строк
 	⌘↩ to finish	⌘↩ для завершения
+# Table cells picked with the mouse: the right-click menu.
+	Alignment	Выравнивание
+	Top Left	Сверху слева
+	Top Center	Сверху по центру
+	Top Right	Сверху справа
+	Middle Left	Посередине слева
+	Middle Center	Посередине по центру
+	Middle Right	Посередине справа
+	Bottom Left	Снизу слева
+	Bottom Center	Снизу по центру
+	Bottom Right	Снизу справа
+	Borders	Границы
+	Text Rotation	Поворот текста
+	Vertical, Upwards	Вертикально, снизу вверх
+	Vertical, Downwards	Вертикально, сверху вниз
+	Remove Formatting	Сбросить форматирование
+	Edit Text	Редактировать текст
+	Insert Block...	Вставить блок...
+	Delete Content	Удалить содержимое
+	Insert Above	Вставить выше
+	Insert Below	Вставить ниже
+	Delete Rows	Удалить строки
+	Insert Left	Вставить слева
+	Insert Right	Вставить справа
+	Delete Columns	Удалить столбцы
+	Rows	Строки
+	Columns	Столбцы
+	All Borders	Все границы
+	Outside Borders	Внешние границы
+	Inside Borders	Внутренние границы
+	Inside Horizontal	Внутренние горизонтальные
+	Inside Vertical	Внутренние вертикальные
+	Top Border	Верхняя граница
+	Bottom Border	Нижняя граница
+	Left Border	Левая граница
+	Right Border	Правая граница
+	Hidden	Скрыть
+	As the Cell Style	Как в стиле ячейки
 @plural	{n} commit	{n} коммит|{n} коммита|{n} коммитов
 @plural	{n} contributor	{n} участник|{n} участника|{n} участников
 	Drawing as bytes	Чертеж как байты

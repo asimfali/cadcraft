@@ -127,6 +127,10 @@ pub struct CanvasState {
     /// Tab was pressed over a snap marker: show the next candidate ([`SnapCycle`]).
     pub snap_tab: bool,
     pub snap_cycle: Option<SnapCycle>,
+    /// Table cells picked with the mouse ([`crate::table_cells`]).
+    pub cells: Option<crate::table_cells::CellSel>,
+    /// A drag across table cells is selecting them.
+    pub cell_drag: bool,
 }
 
 impl CanvasState {
@@ -1524,6 +1528,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             crate::dyngrips::click(app, g);
         } else if let Some(g) = grip_at(app, &xf, hover_pos) {
             click_grip(app, g, mods.shift);
+        } else if crate::table_cells::click(app, raw_world.unwrap_or(p), app.session.settings.pickbox.max(1.0) / scale, mods.shift) {
+            // A click inside a table cell selects the cell.
         } else if let Err(e) = app.session.idle_click(raw_world.unwrap_or(p), mods.shift) {
             app.session.echo(e.to_string());
         }
@@ -1531,7 +1537,27 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Press-and-drag selection window (AutoCAD's PICKDRAG = 2; click-click still works): a drag
     // that starts while objects are being selected opens a window where the button went down,
     // and letting go closes it. Drags on grips and drags while drawing are left alone.
+    // A drag that starts inside a table cell (no command running) selects cells instead.
     if resp.drag_started_by(egui::PointerButton::Primary)
+        && !middle_down
+        && !app.session.prompting()
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && rect.contains(origin)
+        && grip_at(app, &xf, Some(origin)).is_none()
+        && crate::table_cells::click(app, xf.to_world(origin), app.session.settings.pickbox.max(1.0) / scale, false)
+    {
+        app.canvas.cell_drag = true;
+    }
+    if app.canvas.cell_drag {
+        if let Some(w) = raw_world {
+            crate::table_cells::drag_to(app, w);
+        }
+        if resp.drag_stopped_by(egui::PointerButton::Primary) || !ui.input(|i| i.pointer.primary_down()) {
+            app.canvas.cell_drag = false;
+        }
+    }
+    if resp.drag_started_by(egui::PointerButton::Primary)
+        && !app.canvas.cell_drag
         && !middle_down
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1801,6 +1827,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             draw_list(&painter, &xf, &list, bg, false);
         }
     }
+    // Selected table cells.
+    crate::table_cells::validate(app);
+    crate::table_cells::paint(app, &painter, &xf);
     // Pending selection window.
     if let (Some(pw), Some(c)) = (app.session.pending_window, raw_world) {
         let a = xf.to_screen(pw.corner);

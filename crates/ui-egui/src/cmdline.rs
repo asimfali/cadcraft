@@ -305,6 +305,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                 Key::Escape => {
                     app.cmd.buffer.clear();
                     app.session.cancel();
+                    app.canvas.cells = None;
                 }
                 Key::Backspace => {
                     let press = KeyPress { repeat, plain: !(modifiers.alt || modifiers.ctrl || modifiers.command) };

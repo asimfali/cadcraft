@@ -1212,6 +1212,44 @@
 	−Bin	−двійк.
 	−LOC	−рядків
 	⌘↩ to finish	⌘↩ для завершення
+# Table cells picked with the mouse: the right-click menu.
+	Alignment	Вирівнювання
+	Top Left	Угорі ліворуч
+	Top Center	Угорі по центру
+	Top Right	Угорі праворуч
+	Middle Left	Посередині ліворуч
+	Middle Center	Посередині по центру
+	Middle Right	Посередині праворуч
+	Bottom Left	Унизу ліворуч
+	Bottom Center	Унизу по центру
+	Bottom Right	Унизу праворуч
+	Borders	Межі
+	Text Rotation	Поворот тексту
+	Vertical, Upwards	Вертикально, знизу вгору
+	Vertical, Downwards	Вертикально, згори вниз
+	Remove Formatting	Скинути форматування
+	Edit Text	Редагувати текст
+	Insert Block...	Вставити блок...
+	Delete Content	Видалити вміст
+	Insert Above	Вставити вище
+	Insert Below	Вставити нижче
+	Delete Rows	Видалити рядки
+	Insert Left	Вставити ліворуч
+	Insert Right	Вставити праворуч
+	Delete Columns	Видалити стовпці
+	Rows	Рядки
+	Columns	Стовпці
+	All Borders	Усі межі
+	Outside Borders	Зовнішні межі
+	Inside Borders	Внутрішні межі
+	Inside Horizontal	Внутрішні горизонтальні
+	Inside Vertical	Внутрішні вертикальні
+	Top Border	Верхня межа
+	Bottom Border	Нижня межа
+	Left Border	Ліва межа
+	Right Border	Права межа
+	Hidden	Приховано
+	As the Cell Style	Як у стилі комірки
 @plural	{n} commit	{n} коміт|{n} коміти|{n} комітів
 @plural	{n} contributor	{n} учасник|{n} учасники|{n} учасників
 	Drawing as bytes	Креслення як байти
