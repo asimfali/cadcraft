@@ -1390,7 +1390,7 @@ fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<Entity> {
                     height: cell.height,
                     width: cell.width,
                     attach: cell.attach,
-                    rotation: 0.0,
+                    rotation: cell.rotation,
                     style,
                     contents: cell.text.clone(),
                     line_spacing: 1.0,

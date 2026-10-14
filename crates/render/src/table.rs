@@ -37,6 +37,8 @@ pub struct TableText {
     pub at: Vec2,
     /// MTEXT attachment (1 top left … 9 bottom right).
     pub attach: u8,
+    /// Rotation in radians (vertical header text).
+    pub rotation: f64,
     pub height: f64,
     pub color: Color,
     pub style: String,
@@ -325,12 +327,23 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
         let key = (cb.name.to_ascii_lowercase(), cb.props.iter().map(|(k, v)| (k.to_ascii_lowercase(), v.clone())).collect());
         shown.entry(key).or_insert_with(|| cadcraft_doc::cell_visibility(d, cb)).clone()
     };
+    // A cell's own alignment and margins over its cell style's (margins scale with the table).
+    let look = |a: &Anchor, cs: &CellStyle| -> (u8, f64, f64, u16) {
+        let l = t.cells.get(a.row).and_then(|row| row.get(a.col)).and_then(|c| c.look).map(|l| l.sanitized()).unwrap_or_default();
+        (
+            l.align.unwrap_or(cs.align).clamp(1, 9),
+            l.margin_h.map_or(cs.margin_h, |m| m * k),
+            l.margin_v.map_or(cs.margin_v, |m| m * k),
+            l.rotation.unwrap_or(0),
+        )
+    };
     for a in &anchors {
         let Some(cb) = t.cells.get(a.row).and_then(|row| row.get(a.col)).and_then(|c| c.block.as_ref()) else { continue };
         let Some(cs) = styles.get(a.style) else { continue };
+        let (align, margin_h, margin_v, _) = look(a, cs);
         let (x0, x1, y0, y1) = (x_at(a.col), x_at(a.col + a.cols), y_at(a.row), y_at(a.row + a.rows));
         let (min, max) = (p(x0, y1), p(x1, y0));
-        if let Some(block) = cadcraft_doc::place_cell_block(d, cb, visibility(cb), min, max, Vec2::new(cs.margin_h, cs.margin_v), cs.align) {
+        if let Some(block) = cadcraft_doc::place_cell_block(d, cb, visibility(cb), min, max, Vec2::new(margin_h, margin_v), align) {
             g.blocks.push(TableBlock { row: a.row, col: a.col, block });
         }
     }
@@ -339,30 +352,46 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
         let Some(cell) = t.cells.get(a.row).and_then(|row| row.get(a.col)).filter(|c| !c.text.is_empty() && c.block.is_none()) else { continue };
         let Some(cs) = styles.get(a.style) else { continue };
         let (x0, x1, y0, y1) = (x_at(a.col), x_at(a.col + a.cols), y_at(a.row), y_at(a.row + a.rows));
-        let attach = cs.align.clamp(1, 9);
-        let x = match (attach - 1) % 3 {
-            0 => x0 + cs.margin_h,
-            1 => (x0 + x1) / 2.0,
-            _ => x1 - cs.margin_h,
-        };
-        let y = match (attach - 1) / 3 {
-            0 => y0 + cs.margin_v,
-            1 => (y0 + y1) / 2.0,
-            _ => y1 - cs.margin_v,
-        };
+        let (attach, mh, mv, rotation) = look(a, cs);
+        let (min, max) = (p(x0, y1), p(x1, y0));
+        let at = text_anchor(min, max, attach, mh, mv, rotation);
+        // Along the text: the cell's width, or its height for vertical text.
+        let along = if rotation % 180 == 0 { x1 - x0 } else { y1 - y0 };
         g.texts.push(TableText {
             row: a.row,
             col: a.col,
-            at: p(x, y),
+            at,
             attach,
+            rotation: f64::from(rotation).to_radians(),
             height: cell.text_height.filter(|h| h.is_finite() && *h > 0.0).map_or(cs.text_height, |h| h * k),
             color: cs.text_color,
             style: cs.text_style.clone(),
             text: cell.text.clone(),
-            width: (x1 - x0 - 2.0 * cs.margin_h).max(0.0),
+            width: (along - 2.0 * mh).max(0.0),
         });
     }
     g
+}
+
+/// The alignment point of a cell's text in the cell `min` … `max` (world): `attach` (MTEXT
+/// numbering) read in the text's own frame, turned by `rotation` degrees, `mh` from the cell's
+/// sides along the text and `mv` across it.
+fn text_anchor(min: Vec2, max: Vec2, attach: u8, mh: f64, mv: f64, rotation: u16) -> Vec2 {
+    let (h, v) = (usize::from((attach.clamp(1, 9) - 1) % 3), usize::from((attach.clamp(1, 9) - 1) / 3));
+    let c = (min + max) * 0.5;
+    let pick = |[first, mid, last]: [f64; 3], i: usize| match i {
+        0 => first,
+        2 => last,
+        _ => mid,
+    };
+    match rotation {
+        // Reading upwards: the text's left is the cell's bottom, its top the cell's left.
+        90 => Vec2::new(pick([min.x + mv, c.x, max.x - mv], v), pick([min.y + mh, c.y, max.y - mh], h)),
+        180 => Vec2::new(pick([max.x - mh, c.x, min.x + mh], h), pick([min.y + mv, c.y, max.y - mv], v)),
+        // Reading downwards: the text's left is the cell's top, its top the cell's right.
+        270 => Vec2::new(pick([max.x - mv, c.x, min.x + mv], v), pick([max.y - mh, c.y, min.y + mh], h)),
+        _ => Vec2::new(pick([min.x + mh, c.x, max.x - mh], h), pick([max.y - mv, c.y, min.y + mv], v)),
+    }
 }
 
 /// A cell style colour as drawn: ByBlock / ByLayer take the table's colour.
@@ -404,6 +433,7 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, e: &cadcraft_doc::Entity, t: &Tab
         let mp = cadcraft_fonts::MTextParams {
             attach: tx.attach,
             width: tx.width,
+            rotation: tx.rotation,
             font,
             width_factor: ts.width_factor,
             oblique: ts.oblique,

@@ -258,3 +258,99 @@ fn a_dynamic_block_shows_the_cells_visibility_state() {
     s.execute("tinsert", &json!({ "handle": h, "row": 1, "col": 0, "block": "Door", "props": { "Visibility1": "Open" } })).unwrap();
     assert_eq!(lines_in_t(&s), (closed + 1, 3));
 }
+
+#[test]
+fn a_columns_alignment_and_margin_override_the_cell_style() {
+    let mut s = Session::new();
+    let h = s
+        .execute("table", &json!({ "at": [0, 0], "header": ["N", "Name"], "cells": [["1", "a"], ["2", "b"]], "rowHeight": 4.0, "colWidth": 10.0 }))
+        .unwrap()["handle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Column 0's data rows: middle centre; column 1's: middle right, 2 from the right side.
+    let r = s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 0, "scope": "column", "align": "MC" })).unwrap();
+    assert_eq!(r["cells"], 2);
+    s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 1, "scope": "column", "align": "MR", "marginH": 2.0 })).unwrap();
+    let t = table(&s, &h);
+    assert!(t.cells[0][0].look.is_none(), "the header row keeps its style");
+    let g = render::table_geometry(s.doc().unwrap(), &t);
+    let at = |text: &str| g.texts.iter().find(|x| x.text == text).unwrap().clone();
+    let one = at("1");
+    assert_eq!(one.attach, 5);
+    // Row 1 spans y -4..-8: its middle is -6; column 0 spans x 0..10.
+    assert!((one.at.x - 5.0).abs() < 1e-9 && (one.at.y + 6.0).abs() < 1e-9, "{:?}", one.at);
+    let a = at("a");
+    assert_eq!(a.attach, 6);
+    assert!((a.at.x - 18.0).abs() < 1e-9, "{:?}", a.at);
+    // Clearing goes back to the style.
+    s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 0, "scope": "table", "clear": true })).unwrap();
+    assert!(table(&s, &h).cells.iter().flatten().all(|c| c.look.is_none()));
+}
+
+#[test]
+fn vertical_header_text_reads_upwards_and_wraps_along_the_cell_height() {
+    let (mut s, h) = session();
+    s.execute("table.set", &json!({ "handle": h, "row": 0, "col": 0, "text": "Format" })).unwrap();
+    s.execute("table.cellformat", &json!({ "handle": h, "row": 0, "col": 0, "align": "MC", "rotation": 90 })).unwrap();
+    let t = table(&s, &h);
+    let g = render::table_geometry(s.doc().unwrap(), &t);
+    let x = g.texts.iter().find(|x| x.text == "Format").unwrap();
+    assert!((x.rotation - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    // The cell is 10 wide and 4 high: the text wraps at the height.
+    let mh = render::table_style_of(s.doc().unwrap(), &t).cell_style("Data").margin_h;
+    assert!((x.width - (4.0 - 2.0 * mh)).abs() < 1e-9, "{}", x.width);
+    assert!((x.at.x - 5.0).abs() < 1e-9 && (x.at.y + 2.0).abs() < 1e-9, "{:?}", x.at);
+    // Kept through DXF.
+    let back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    let t2 = back.model.iter().find_map(|e| if let EntityKind::Table(t) = &e.kind { Some(t.clone()) } else { None }).unwrap();
+    assert_eq!(t2.cells[0][0].look, t.cells[0][0].look);
+}
+
+#[test]
+fn cellformat_at_the_command_line() {
+    let (mut s, h) = session();
+    s.cmdline("table.cellformat").unwrap();
+    // Cell (0, 1): x 10..20, y 0..-4; its column, middle right, margin 1.5, no rotation change.
+    s.cmdline("15,-2").unwrap();
+    s.cmdline("o").unwrap();
+    s.cmdline("mr").unwrap();
+    s.cmdline("1.5").unwrap();
+    s.cmdline("").unwrap();
+    assert!(!s.prompting());
+    let t = table(&s, &h);
+    for r in 0..2 {
+        let l = t.cells[r][1].look.unwrap();
+        assert_eq!((l.align, l.margin_h, l.rotation), (Some(6), Some(1.5), None));
+    }
+    assert!(t.cells[0][0].look.is_none());
+    // A range by its two corners.
+    s.cmdline("table.cellformat").unwrap();
+    s.cmdline("5,-6").unwrap();
+    s.cmdline("a").unwrap();
+    s.cmdline("15,-2").unwrap();
+    s.cmdline("tc").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("90").unwrap();
+    let t = table(&s, &h);
+    assert!(t.cells.iter().flatten().all(|c| c.look.is_some_and(|l| l.align == Some(2) && l.rotation == Some(90))));
+}
+
+#[test]
+fn bad_cellformat_parameters_are_refused() {
+    let (mut s, h) = session();
+    for p in [
+        json!({ "handle": h, "row": 0, "col": 0 }),
+        json!({ "handle": h, "row": 0, "col": 0, "align": "XX" }),
+        json!({ "handle": h, "row": 0, "col": 0, "rotation": 45 }),
+        json!({ "handle": h, "row": 0, "col": 0, "margin": -1 }),
+        json!({ "handle": h, "row": 0, "col": 0, "align": "MC", "scope": "diagonal" }),
+        json!({ "handle": h, "row": 7, "col": 0, "align": "MC" }),
+        json!({ "handle": h, "row": 0, "col": 0, "align": "MC", "scope": "range", "rows": u64::MAX, "cols": u64::MAX, "rotation": u64::MAX }),
+    ] {
+        assert!(s.execute("table.cellformat", &p).is_err(), "{p}");
+    }
+    let r =
+        s.execute("table.cellformat", &json!({ "handle": h, "row": 1, "col": 1, "align": 5, "scope": "range", "rows": u64::MAX, "cols": u64::MAX }));
+    assert_eq!(r.unwrap()["cells"], 1, "a range is cut at the table's edge");
+}

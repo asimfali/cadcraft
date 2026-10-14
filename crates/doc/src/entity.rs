@@ -933,6 +933,9 @@ pub struct TableCell {
     /// The cell's own borders, over its cell style's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edges: Option<crate::CellEdges>,
+    /// The cell's own alignment, margins and text rotation, over its cell style's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<crate::CellLook>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -86,6 +86,44 @@ impl CellEdges {
     }
 }
 
+/// A cell's own look over its cell style's: alignment, margins and text rotation. `None`
+/// values follow the cell style.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CellLook {
+    /// MTEXT attachment, 1 top left … 9 bottom right.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub align: Option<u8>,
+    /// Margin between the cell's sides and its content, along the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_h: Option<f64>,
+    /// Margin across the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_v: Option<f64>,
+    /// Text rotation in degrees: 0, 90 (reading upwards), 180 or 270.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<u16>,
+}
+
+impl CellLook {
+    /// Whether nothing is overridden.
+    pub fn is_empty(&self) -> bool {
+        *self == CellLook::default()
+    }
+
+    /// A copy with every value in range (hostile input from files and JSON): alignments
+    /// 1..=9, finite non-negative margins, quarter-turn rotations.
+    pub fn sanitized(self) -> CellLook {
+        let margin = |m: Option<f64>| m.filter(|v| v.is_finite() && *v >= 0.0).map(|v| v.min(1e9));
+        CellLook {
+            align: self.align.filter(|a| (1..=9).contains(a)),
+            margin_h: margin(self.margin_h),
+            margin_v: margin(self.margin_v),
+            rotation: self.rotation.filter(|r| [0, 90, 180, 270].contains(r)),
+        }
+    }
+}
+
 /// How heavy a border looks, to pick between two borders on one edge: an invisible border is
 /// lightest, a logical lineweight counts as the default 0.25 mm.
 pub fn border_weight(b: &CellBorder) -> i32 {

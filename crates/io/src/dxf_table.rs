@@ -9,7 +9,7 @@
 
 use cadcraft_color::Color;
 use cadcraft_doc::{
-    CellBlock, CellBorder, CellEdges, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle,
+    CellBlock, CellBorder, CellEdges, CellLook, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle,
 };
 use cadcraft_dxf::Tag;
 use serde::{Deserialize, Serialize};
@@ -192,6 +192,9 @@ struct TableExtra {
     /// (row, col, borders) of the cells with borders of their own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     edges: Vec<(usize, usize, CellEdges)>,
+    /// (row, col, look) of the cells with their own alignment, margins or text rotation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    looks: Vec<(usize, usize, CellLook)>,
 }
 
 /// The xdata strings of a table's extra data (marker first), or nothing for a plain table.
@@ -204,6 +207,7 @@ pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
         link: t.data_link.clone(),
         blocks: Vec::new(),
         edges: Vec::new(),
+        looks: Vec::new(),
     };
     for (r, row) in t.cells.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
@@ -216,9 +220,19 @@ pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
             if let Some(e) = cell.edges.filter(|e| !e.is_empty()) {
                 x.edges.push((r, c, e));
             }
+            if let Some(l) = cell.look.filter(|l| !l.is_empty()) {
+                x.looks.push((r, c, l));
+            }
         }
     }
-    if x.rows.is_empty() && x.cells.is_empty() && x.breaks.is_none() && x.link.is_none() && x.blocks.is_empty() && x.edges.is_empty() {
+    if x.rows.is_empty()
+        && x.cells.is_empty()
+        && x.breaks.is_none()
+        && x.link.is_none()
+        && x.blocks.is_empty()
+        && x.edges.is_empty()
+        && x.looks.is_empty()
+    {
         return Vec::new();
     }
     let Ok(json) = serde_json::to_string(&x) else { return Vec::new() };
@@ -253,6 +267,12 @@ pub(crate) fn read_table_xdata(tags: &[Tag], t: &mut Table) {
     for (r, c, e) in x.edges {
         if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c)) {
             cell.edges = (!e.is_empty()).then_some(e);
+        }
+    }
+    for (r, c, l) in x.looks {
+        let l = l.sanitized();
+        if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c)) {
+            cell.look = (!l.is_empty()).then_some(l);
         }
     }
 }
