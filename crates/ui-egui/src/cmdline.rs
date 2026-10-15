@@ -35,6 +35,79 @@ pub struct CmdLine {
     pub options_anchor: Option<Pos2>,
     /// The files a file prompt lists and completes on Tab.
     pub files: Option<crate::file_prompt::FileList>,
+    /// The AutoComplete row the arrows or Tab moved to: (what was typed, row, the text Tab put
+    /// in the command line, if it did).
+    sug: Option<(String, usize, Option<String>)>,
+}
+
+/// What the AutoComplete list is for: what was typed, also after Tab put a command name in.
+fn sug_prefix(c: &CmdLine) -> String {
+    match &c.sug {
+        Some((typed, _, Some(put))) if *put == c.buffer => typed.clone(),
+        _ => c.buffer.clone(),
+    }
+}
+
+/// The highlighted AutoComplete row: the first unless the arrows or Tab moved it.
+fn sug_index(c: &CmdLine) -> usize {
+    match &c.sug {
+        Some((typed, i, put)) if put.as_deref() == Some(c.buffer.as_str()) || (put.is_none() && *typed == c.buffer) => *i,
+        _ => 0,
+    }
+}
+
+/// Move the AutoComplete highlight by `step` (wrapping); `false` when no list shows. With `put`,
+/// the row's command name goes in the command line (Tab), as AutoCAD cycles through them.
+fn sug_step(app: &mut CadApp, step: isize, put: bool) -> bool {
+    if app.session.prompting() {
+        return false;
+    }
+    let typed = sug_prefix(&app.cmd);
+    let list = suggestions(&typed);
+    if list.is_empty() {
+        return false;
+    }
+    // Whether the highlight was already moved for this typing, and whether by the arrows.
+    let buffer = app.cmd.buffer.as_str();
+    let current = app.cmd.sug.as_ref().is_some_and(|(t, _, p)| *t == typed && (p.as_deref() == Some(buffer) || (p.is_none() && t == buffer)));
+    let by_arrows = current && app.cmd.sug.as_ref().is_some_and(|s| s.2.is_none());
+    let at = sug_index(&app.cmd);
+    let i = match (put, current) {
+        // The first Tab puts the first row in; Tab after the arrows, the highlighted one.
+        (true, false) => 0,
+        (true, true) if by_arrows => at,
+        _ => (at as isize + step).rem_euclid(list.len() as isize) as usize,
+    };
+    let shown = if put {
+        // The name as listed: the alias of "RPT (REPORT)", else the command.
+        list.get(i).map(|s| s.display.split(" (").next().unwrap_or(&s.display).to_string())
+    } else {
+        app.cmd.sug.as_ref().and_then(|s| s.2.clone()).filter(|p| *p == app.cmd.buffer)
+    };
+    if let Some(t) = &shown
+        && put
+    {
+        app.cmd.buffer = t.clone();
+    }
+    app.cmd.sug = Some((typed, i, shown));
+    true
+}
+
+/// The command Enter starts from the AutoComplete list: the highlighted row once the arrows or
+/// Tab moved to it, or the first row when what was typed is no command (`rp` → RPT), as AutoCAD
+/// does. `None`: the typed text goes as it is.
+fn sug_choice(app: &CadApp) -> Option<String> {
+    if app.session.prompting() {
+        return None;
+    }
+    let list = suggestions(&sug_prefix(&app.cmd));
+    let moved = app.cmd.sug.as_ref().is_some_and(|(typed, _, put)| put.as_deref() == Some(app.cmd.buffer.as_str()) || *typed == app.cmd.buffer);
+    if moved {
+        return list.get(sug_index(&app.cmd)).map(|s| s.id.to_ascii_lowercase());
+    }
+    let typed = app.cmd.buffer.trim().to_ascii_lowercase();
+    let known = cadcraft_engine::cmd::find_command(&cadcraft_engine::cmd::resolve_alias(&typed)).is_some();
+    if known { None } else { list.first().map(|s| s.id.to_ascii_lowercase()) }
 }
 
 /// The most history lines the command line shows above its bar.
@@ -98,8 +171,8 @@ fn tab(app: &mut CadApp) {
     {
         // Both values typed: Tab locks the second one as well.
         app.cmd.locked_second = Some(app.cmd.buffer.clone());
-    } else if let Some(s) = suggestions(&app.cmd.buffer).first() {
-        app.cmd.buffer = s.id.clone();
+    } else {
+        sug_step(app, 1, true);
     }
 }
 
@@ -329,6 +402,8 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                         app.cmd.buffer.pop();
                     }
                 }
+                // With the AutoComplete list showing, the arrows move through it.
+                Key::ArrowUp if !modifiers.any() && app.cmd.history_pos.is_none() && sug_step(app, -1, false) => {}
                 Key::ArrowUp if !modifiers.any() => {
                     if !app.cmd.history.is_empty() {
                         let n = app.cmd.history.len();
@@ -339,6 +414,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                 }
                 Key::ArrowDown if !modifiers.any() => {
                     if !options_key(app, 1)
+                        && !(app.cmd.history_pos.is_none() && sug_step(app, 1, false))
                         && let Some(p) = app.cmd.history_pos
                     {
                         let np = p + 1;
@@ -383,6 +459,11 @@ pub fn submit(app: &mut CadApp) {
             app.cmd.buffer = text;
         }
     }
+    // A partly typed command: the AutoComplete row it means.
+    if let Some(id) = sug_choice(app) {
+        app.cmd.buffer = id;
+    }
+    app.cmd.sug = None;
     let text = std::mem::take(&mut app.cmd.buffer);
     app.cmd.locked_second = None;
     app.cmd.history_pos = None;
@@ -521,7 +602,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     );
     // AutoComplete list.
     if !app.session.prompting() {
-        let sug = suggestions(&app.cmd.buffer);
+        let sug = suggestions(&sug_prefix(&app.cmd));
+        let at = sug_index(&app.cmd);
         if !sug.is_empty() {
             let rh = 20.0;
             let lr = Rect::from_min_size(
@@ -536,7 +618,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
             for (i, s) in sug.iter().enumerate() {
                 let r = Rect::from_min_size(pos2(lr.left(), lr.top() + rh * i as f32), vec2(lr.width(), rh));
                 let resp = ui.interact(r, ui.id().with(("sug", i)), Sense::click());
-                if resp.hovered() || i == 0 {
+                if resp.hovered() || i == at {
                     p.rect_filled(r.shrink(1.0), 2.0, if resp.hovered() { t.cmd_keyword_hover } else { t.list_row });
                 }
                 p.text(Pos2::new(r.left() + 8.0, r.center().y), egui::Align2::LEFT_CENTER, &s.display, crate::theme::body(), t.text);
@@ -583,7 +665,7 @@ fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
     let grip = Rect::from_min_max(pos2(bar.left(), top - 3.0), pos2(bar.right(), top + 3.0));
     let mut all = bar.union(grip);
     if !app.session.prompting() {
-        let k = suggestions(&app.cmd.buffer).len();
+        let k = suggestions(&sug_prefix(&app.cmd)).len();
         if k > 0 {
             let above = if n == 0 { 0.0 } else { LINE_H * n as f32 + 6.0 };
             all = all.union(Rect::from_min_size(pos2(bar.left(), bar.top() - 6.0 - 20.0 * k as f32 - above), vec2(bar.width(), 1.0)));
@@ -828,10 +910,49 @@ mod autocomplete_tests {
     }
 
     #[test]
-    fn tab_autocompletes_alias_to_resolved_command() {
+    fn tab_cycles_through_the_listed_names() {
         let mut app = CadApp::new(cadcraft_engine::Session::empty(), crate::Services::default());
         app.cmd.buffer = "rec".to_string();
         tab(&mut app);
-        assert_eq!(app.cmd.buffer, "RECTANG");
+        assert_eq!(app.cmd.buffer, "REC");
+        tab(&mut app);
+        assert_eq!(app.cmd.buffer, "RECOVER");
+        // The list stays the one for what was typed.
+        assert_eq!(suggestions(&sug_prefix(&app.cmd))[0].id, "RECTANG");
+        assert_eq!(sug_choice(&app).as_deref(), Some("recover"));
+        // Down, then Tab: the highlighted row goes in.
+        app.cmd.sug = None;
+        app.cmd.buffer = "rec".into();
+        sug_step(&mut app, 1, false);
+        tab(&mut app);
+        assert_eq!(app.cmd.buffer, "RECOVER");
+    }
+
+    #[test]
+    fn arrows_pick_a_row_and_enter_starts_it() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        app.cmd.buffer = "rp".to_string();
+        let list = suggestions("rp");
+        assert_eq!(list[0].id, "REPORT");
+        // A partly typed name: Enter means the first row.
+        assert_eq!(sug_choice(&app).as_deref(), Some("report"));
+        assert!(sug_step(&mut app, 1, false));
+        assert_eq!(app.cmd.buffer, "rp", "the arrows leave the typing alone");
+        assert_eq!(sug_choice(&app).as_deref(), Some(list[1].id.to_ascii_lowercase().as_str()));
+        assert!(sug_step(&mut app, -1, false));
+        assert_eq!(sug_index(&app.cmd), 0);
+        assert!(sug_step(&mut app, -1, false));
+        assert_eq!(sug_index(&app.cmd), list.len() - 1, "wraps");
+        // A known alias or command runs as typed.
+        app.cmd.sug = None;
+        app.cmd.buffer = "l".into();
+        assert_eq!(sug_choice(&app), None);
+        submit(&mut app);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("line"));
+        // Enter on "rp" starts REPORT.
+        app.session.cancel();
+        app.cmd.buffer = "rp".into();
+        submit(&mut app);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("report"));
     }
 }
