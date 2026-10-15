@@ -145,11 +145,11 @@ fn selection_menu_has_the_object_types_edit_commands() {
         assert!(ids(&g).iter().any(|i| i == edit), "{cmd}: {edit} missing from {:?}", labels(&g));
         assert!(ids(&context_menu::entries(&app)).iter().any(|i| i == edit));
     }
-    // Polyline Edit, not the command's bare "Polyline" label.
+    // Polyline Edit, not the command's bare "Polyline" label; a polyline can be a wire.
     let mut app = app();
     app.run("pline", json!({ "vertices": [[0, 0], [10, 0]] })).unwrap();
     select_all(&mut app);
-    assert_eq!(labels(&[context_menu::object_entries(&app)]), ["Polyline Edit"]);
+    assert_eq!(labels(&[context_menu::object_entries(&app)]), ["Polyline Edit", "Wire Data...", "Number Wires"]);
 }
 
 #[test]

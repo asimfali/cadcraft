@@ -148,7 +148,9 @@ fn object_commands(app: &CadApp) -> Vec<(&'static str, Option<&'static str>)> {
             v
         }
         EntityKind::Hatch(_) => vec![("hatchedit", None)],
-        EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_) => vec![("pedit", Some("Polyline Edit"))],
+        // Polylines and lines can be wires: their wire list data.
+        EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_) => vec![("pedit", Some("Polyline Edit")), ("wire", None), ("wirenum", None)],
+        EntityKind::Line(_) => vec![("wire", None), ("wirenum", None)],
         EntityKind::Spline(_) => vec![("splinedit", Some("Spline Edit"))],
         EntityKind::Dimension(_) => vec![("dimtedit", None)],
         EntityKind::MLeader(_) => vec![("mleaderedit", None)],

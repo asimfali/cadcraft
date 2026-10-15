@@ -1411,3 +1411,23 @@
 	Table Breaks...	Розбиття таблиці...
 	Enter maximum part height or	Введіть найбільшу висоту частини або
 	Enter height of the first part	Введіть висоту першої частини
+# Wires (WIRE, WIRENUM, the Properties palette's Wire section).
+	Wires	Дроти
+	Wire Data...	Дані дроту...
+	Set Wire Data	Задати дані дроту
+	Wire Data	Дані дроту
+	Wire Data Choices	Списки даних дроту
+	Number Wires	Нумерація дротів
+	Wire	Дріт
+	Terminal 1	Наконечник 1
+	Terminal 2	Наконечник 2
+	Number	Номер
+	Select wires	Виберіть дроти
+	Enter wire length or	Введіть довжину дроту або
+	Enter terminal at the start	Введіть наконечник на початку
+	Enter terminal at the end	Введіть наконечник у кінці
+	Enter wire number	Введіть номер дроту
+	Enter wire type	Введіть тип дроту
+	Enter wire color	Введіть колір дроту
+	Enter first wire number	Введіть перший номер дроту
+	Select wire	Виберіть дріт

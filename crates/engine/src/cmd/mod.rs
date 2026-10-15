@@ -42,6 +42,7 @@ mod tolerance;
 mod trimextend;
 mod utility;
 mod view;
+pub mod wire;
 
 pub mod curves;
 pub mod helpers;
@@ -203,6 +204,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(tolerance::specs());
         v.extend(constraints::specs());
         v.extend(lisp::specs());
+        v.extend(wire::specs());
         v
     })
 }

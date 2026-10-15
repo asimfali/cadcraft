@@ -192,6 +192,23 @@ impl Drawing {
         self.handseed = self.handseed.saturating_add(1);
         h
     }
+    /// Set the XRECORD `key` of `entity`'s extension dictionary to text `value`, making them
+    /// when missing (data other programs keep on objects, e.g. a wire's length and terminals).
+    pub fn set_xrecord_text(&mut self, entity: Handle, key: &str, value: &str) {
+        let handles = [self.new_handle(), self.new_handle()];
+        std::sync::Arc::make_mut(&mut self.foreign).set_xrecord_text(entity, key, value, handles);
+    }
+
+    /// The text of the XRECORD `key` in `entity`'s extension dictionary (its first value).
+    pub fn xrecord_text(&self, entity: Handle, key: &str) -> Option<String> {
+        let index = self.foreign.object_index();
+        self.foreign
+            .xrecords(&index, entity)
+            .into_iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .and_then(|(_, tags)| tags.first().map(|t| t.value.clone()))
+    }
+
     /// Make sure future handles don't collide with `h` (after loading a file).
     pub fn bump_handseed(&mut self, h: Handle) {
         if h.0 >= self.handseed {

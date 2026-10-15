@@ -1089,3 +1089,23 @@
 	Table Breaks...	Разбиение таблицы...
 	Enter maximum part height or	Введите наибольшую высоту части или
 	Enter height of the first part	Введите высоту первой части
+# Wires (WIRE, WIRENUM, the Properties palette's Wire section).
+	Wires	Провода
+	Wire Data...	Данные провода...
+	Set Wire Data	Задать данные провода
+	Wire Data	Данные провода
+	Wire Data Choices	Списки данных провода
+	Number Wires	Нумерация проводов
+	Wire	Провод
+	Terminal 1	Наконечник 1
+	Terminal 2	Наконечник 2
+	Number	Номер
+	Select wires	Выберите провода
+	Enter wire length or	Введите длину провода или
+	Enter terminal at the start	Введите наконечник в начале
+	Enter terminal at the end	Введите наконечник в конце
+	Enter wire number	Введите номер провода
+	Enter wire type	Введите тип провода
+	Enter wire color	Введите цвет провода
+	Enter first wire number	Введите первый номер провода
+	Select wire	Выберите провод

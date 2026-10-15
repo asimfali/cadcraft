@@ -13,6 +13,7 @@ use crate::theme::Tokens;
 pub mod patterns;
 /// The QuickCalc palette.
 pub mod quickcalc;
+pub(crate) mod wire;
 
 type Tool = (Icon, &'static str, &'static str);
 
@@ -842,6 +843,12 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.painter().rect_filled(r.shrink2(vec2(6.0, 1.0)), 2.0, t.chrome_dark);
         ui.painter().text(pos2(r.left() + 12.0, r.center().y), egui::Align2::LEFT_CENTER, crate::i18n::t(title), crate::theme::small(), t.text_dim);
     };
+    // Wires (polylines or lines): their wire list data, first.
+    let is_wire = |h: &cadcraft_engine::doc::Handle| {
+        d.entity(*h).is_some_and(|e| matches!(e.kind, EntityKind::LwPolyline(_) | EntityKind::Line(_) | EntityKind::Polyline3d(_)))
+    };
+    let wires: Vec<cadcraft_engine::doc::Handle> = sel.iter().copied().filter(is_wire).collect();
+    let wire_set = if !wires.is_empty() && wires.len() == sel.len() { wire::section(app, ui, &wires, &group) } else { None };
     group(ui, "General");
     prop_row(ui, "Color", |ui| {
         ui.menu_button(format!("■ {}", crate::i18n::t(&color)), |ui| {
@@ -1092,6 +1099,11 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     if let Some(p) = set {
         let _ = app.run("properties.set", p);
+    }
+    if let Some(p) = wire_set
+        && let Err(e) = app.run("wire.set", p)
+    {
+        app.session.echo(e);
     }
     report_bad(app, bad);
     if let Some(p) = custom_set {

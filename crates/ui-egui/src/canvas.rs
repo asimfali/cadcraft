@@ -1930,6 +1930,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // A wire under the cursor shows its data (number, length, terminals, type, colour).
+    if let (Some(h), Some(hp)) = (app.canvas.hover, hover_pos)
+        && let Some(text) = crate::palettes::wire::tip(app, ui.ctx(), h)
+    {
+        tooltip(&painter, hp + vec2(18.0, 18.0), &text);
+    }
     // No continuous repaint while hovering: input events repaint by themselves. Repainting every
     // frame kept a vsync swapchain's queue full (every frame waited behind queued ones) and would
     // spin the CPU with the low-latency present mode (`gpu::surface_config`).
