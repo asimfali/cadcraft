@@ -152,7 +152,7 @@ fn typed_tabletemplate_inserts_or_lays_out_the_selected_table() {
     s.cmdline(&file.to_string_lossy()).unwrap();
     s.cmdline("3").unwrap();
     s.cmdline("0,0").unwrap();
-    let h = s.selection()[0].hex();
+    let h = last_table(&s);
     assert_eq!(table(&s, &h).cells.len(), 4);
     // A plain table selected first is laid out by the template (the file is remembered).
     let r = s.execute("table", &json!({ "at": [0, 100], "rows": 2, "cols": 2 })).unwrap();
@@ -206,4 +206,9 @@ fn bare_file_names_are_found_and_wrong_kinds_explained() {
         other => panic!("{other:?}"),
     }
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The handle of the last table drawn.
+fn last_table(s: &Session) -> String {
+    s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle).max().unwrap().hex()
 }

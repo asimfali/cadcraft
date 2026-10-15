@@ -666,8 +666,7 @@ impl Interactive for TemplateM {
             Stage::Point => match i {
                 Input::Point(p) => {
                     let Some(l) = &self.loaded else { return Ok(Step::Cancel) };
-                    let h = insert(s, l, p, self.rows)?;
-                    s.set_selection(vec![h]);
+                    insert(s, l, p, self.rows)?;
                     Ok(Step::Done)
                 }
                 Input::Enter => Ok(Step::Cancel),

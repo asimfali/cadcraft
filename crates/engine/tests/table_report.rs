@@ -191,7 +191,7 @@ fn reports_read_definition_and_lookup_files() {
     s.cmdline(&file.to_string_lossy()).unwrap();
     s.cmdline("").unwrap();
     s.cmdline("200,0").unwrap();
-    let h = s.selection()[0].hex();
+    let h = last_table(&s);
     let t = table(&s, &h);
     assert_eq!(texts(&t)[8], ["7", "Провод ПВ3 1,5 красный", "50 см"]);
     assert_eq!(t.report.as_ref().map(|r| r.file.clone()), Some(file.to_string_lossy().into_owned()));
@@ -210,6 +210,52 @@ fn reports_read_definition_and_lookup_files() {
     assert_eq!(r["updated"], 0);
     assert!(r["errors"][0].as_str().unwrap().contains("ends.csv"));
     assert_eq!(texts(&table(&s, &h))[8], ["7", "Провод ПВ3 1,5 красный", "50.0 см"]);
+}
+
+#[test]
+fn typed_report_asks_for_the_objects_even_with_a_selection() {
+    let mut s = drawing();
+    let sb: Vec<Handle> =
+        s.doc().unwrap().model.iter().filter(|e| matches!(&e.kind, EntityKind::Insert(i) if i.block == "SB")).map(|e| e.handle).collect();
+    let def = json!({"from": "insert", "fields": {"name": "{att.VAL1C}"}, "where": {"name": "?*"}, "group": ["name"], "row": ["{name}", "{count}"]});
+    let dir = std::env::temp_dir().join(format!("cadcraft-report-typed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("parts.json");
+    std::fs::write(&file, def.to_string()).unwrap();
+    let rows = |s: &Session| texts(&table(s, &last_table(s))).len();
+    // Selected before: offered, Enter takes it.
+    s.set_selection(sb.clone());
+    s.cmdline("report").unwrap();
+    s.cmdline(&file.to_string_lossy()).unwrap();
+    assert!(s.current_prompt().is_some_and(|p| p.message.starts_with("Select objects") && p.keywords == ["Selected"]));
+    s.cmdline("").unwrap();
+    s.cmdline("100,0").unwrap();
+    assert_eq!(rows(&s), 1);
+    assert!(s.selection().is_empty(), "the new table is not left selected");
+    // All, though something is selected.
+    s.set_selection(sb.clone());
+    s.cmdline("report").unwrap();
+    s.cmdline("").unwrap();
+    // ALL selects every object, as at any Select objects prompt.
+    s.cmdline("all").unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("200,0").unwrap();
+    assert_eq!(rows(&s), 2);
+    // The Selected option, from the menu.
+    s.set_selection(sb.clone());
+    s.cmdline("report").unwrap();
+    s.cmdline("").unwrap();
+    s.input(cadcraft_engine::Input::Keyword("Selected".into())).unwrap();
+    s.cmdline("250,0").unwrap();
+    assert_eq!(rows(&s), 1);
+    // Nothing selected: pick objects, or Enter for all.
+    s.cmdline("report").unwrap();
+    s.cmdline("").unwrap();
+    s.input(cadcraft_engine::Input::Pick(sb[..1].to_vec())).unwrap();
+    s.cmdline("").unwrap();
+    s.cmdline("300,0").unwrap();
+    assert_eq!(rows(&s), 1);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -269,4 +315,9 @@ fn bad_reports_are_errors() {
     // Fields that refer to each other stop.
     let r = s.execute("report", &json!({ "definition": {"from": "insert", "fields": {"a": "{b}", "b": "{a}"}, "row": ["{a}"]} })).unwrap();
     assert_eq!(r["rows"].as_array().map(Vec::len), Some(4));
+}
+
+/// The handle of the last table drawn.
+fn last_table(s: &Session) -> String {
+    s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle).max().unwrap().hex()
 }

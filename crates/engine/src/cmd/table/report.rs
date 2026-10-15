@@ -538,6 +538,8 @@ struct ReportM {
     last: String,
     loaded: Option<Loaded>,
     sel: SelectPhase,
+    /// What was selected before the command: offered as the Selected option.
+    pre: Vec<Handle>,
     handles: Vec<Handle>,
     rows: Vec<Row>,
 }
@@ -549,8 +551,26 @@ impl ReportM {
             last: s.last_used.report_file.clone(),
             loaded: None,
             sel: SelectPhase::default(),
+            pre: Vec::new(),
             handles: Vec::new(),
             rows: Vec::new(),
+        }
+    }
+
+    /// Picks at "Select objects": Enter with nothing picked takes what was selected before the
+    /// command, else every object.
+    fn select(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match self.sel.feed(s, &i)? {
+            SelOutcome::More => Ok(Step::Continue),
+            SelOutcome::Empty => {
+                let hs = std::mem::take(&mut self.pre);
+                s.set_selection(Vec::new());
+                self.objects_chosen(s, hs)
+            }
+            SelOutcome::Done(hs) => {
+                s.set_selection(Vec::new());
+                self.objects_chosen(s, hs)
+            }
         }
     }
 
@@ -570,6 +590,14 @@ impl Interactive for ReportM {
     fn name(&self) -> &'static str {
         "REPORT"
     }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        // The objects are always asked for (the file comes first): a selection made before is
+        // the default, not taken silently.
+        if s.settings.pickfirst {
+            self.pre = s.selection();
+        }
+        Ok(Step::Continue)
+    }
     fn prompt(&self, s: &Session) -> Prompt {
         match self.stage {
             Stage::File => {
@@ -577,6 +605,10 @@ impl Interactive for ReportM {
                 if self.last.is_empty() { p } else { p.default(self.last.clone()) }
             }
             Stage::Select if self.sel.removing => self.sel.prompt(),
+            // ALL (any Select objects prompt has it) takes every object.
+            Stage::Select if !self.pre.is_empty() && self.sel.picked.is_empty() => {
+                Prompt::new("Select objects to report on", Accept::SELECT).kw(&["Selected"]).default("Selected")
+            }
             Stage::Select => Prompt::new("Select objects to report on <All>", Accept::SELECT),
             Stage::Point => Prompt::new("Specify insertion point", Accept::POINT),
         }
@@ -596,30 +628,25 @@ impl Interactive for ReportM {
                     Ok(l) => {
                         s.last_used.report_file = l.file.clone().unwrap_or(f);
                         self.loaded = Some(l);
-                        self.sel = SelectPhase::begin(s);
-                        if self.sel.done {
-                            let hs = self.sel.picked.clone();
-                            return self.objects_chosen(s, hs);
-                        }
+                        self.sel = SelectPhase::default();
                         self.stage = Stage::Select;
                     }
                     Err(e) => s.echo(e.to_string()),
                 }
                 Ok(Step::Continue)
             }
-            Stage::Select => match self.sel.feed(s, &i)? {
-                SelOutcome::More => Ok(Step::Continue),
-                SelOutcome::Empty => self.objects_chosen(s, Vec::new()),
-                SelOutcome::Done(hs) => {
+            Stage::Select => match &i {
+                Input::Keyword(k) | Input::Text(k) if ["selected", "s"].contains(&k.trim().to_ascii_lowercase().as_str()) && !self.pre.is_empty() => {
+                    let hs = self.pre.clone();
                     s.set_selection(Vec::new());
                     self.objects_chosen(s, hs)
                 }
+                _ => self.select(s, i),
             },
             Stage::Point => match i {
                 Input::Point(p) => {
                     let Some(l) = &self.loaded else { return Ok(Step::Cancel) };
-                    let h = insert(s, l, &self.rows, p, &self.handles, None)?;
-                    s.set_selection(vec![h]);
+                    insert(s, l, &self.rows, p, &self.handles, None)?;
                     Ok(Step::Done)
                 }
                 Input::Enter => Ok(Step::Cancel),
