@@ -1238,6 +1238,34 @@ fn tables_roundtrip_with_title_header_and_merges() {
 }
 
 #[test]
+fn report_tables_keep_their_report() {
+    let mut d = Drawing::new_imperial();
+    let circle = EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 1.0 });
+    let c = d.add(&Space::Model, Common::default(), circle).unwrap();
+    let mut t = table_sample();
+    t.report = Some(cadcraft_doc::TableReport {
+        file: "C:/reports/doors.json".into(),
+        definition: r#"{"row":["{name}","{count}"]}"#.into(),
+        start_row: 2,
+        handles: vec![c],
+    });
+    d.add(&Space::Model, Common::default(), EntityKind::Table(t.clone())).unwrap();
+    let back = roundtrip(&d);
+    let got = first(&back, |k| if let EntityKind::Table(x) = k { Some(x.clone()) } else { None });
+    assert_eq!(got.report, t.report);
+    assert!(matches!(back.entity(c).map(|e| &e.kind), Some(EntityKind::Circle(_))), "the objects it reads keep their handles");
+    // A large definition next to its file stays in the file.
+    let mut big = t.clone();
+    if let Some(r) = big.report.as_mut() {
+        r.definition = format!(r#"{{"title":"{}","row":["x"]}}"#, "x".repeat(20_000));
+    }
+    let mut d2 = Drawing::new_imperial();
+    d2.add(&Space::Model, Common::default(), EntityKind::Table(big)).unwrap();
+    let got = first(&roundtrip(&d2), |k| if let EntityKind::Table(x) = k { Some(x.clone()) } else { None });
+    assert_eq!(got.report.map(|r| (r.file, r.definition.len())), Some(("C:/reports/doors.json".into(), 0)));
+}
+
+#[test]
 fn text_style_flags_roundtrip() {
     let mut d = Drawing::new_imperial();
     let st = TextStyle {

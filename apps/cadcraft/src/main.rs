@@ -143,6 +143,15 @@ fn services() -> Services {
                 .save_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
+        pick_file: Some(Box::new(|title: &str, exts: &[String]| {
+            let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+            rfd::FileDialog::new()
+                .set_title(title)
+                .add_filter(title, &exts)
+                .add_filter(i18n::t("All files"), &["*"])
+                .pick_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
     }
 }
 

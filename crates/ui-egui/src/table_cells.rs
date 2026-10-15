@@ -390,7 +390,12 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         item("Insert Right", format!("{CELL}col:right")),
         item("Delete Columns", format!("{CELL}col:delete")),
     ];
-    Some(vec![clip, cell, content, merge, vec![sub("Rows", rows), sub("Columns", cols)]])
+    let mut groups = vec![clip, cell, content, merge, vec![sub("Rows", rows), sub("Columns", cols)]];
+    // A report table fills its data rows again from the drawing.
+    if table(app, sel.table).is_some_and(|t| t.report.is_some()) {
+        groups.push(vec![item("Update Report", format!("{CELL}report"))]);
+    }
+    Some(groups)
 }
 
 /// Run cell action `action` (an item id without [`CELL`]) on the selected cells.
@@ -472,6 +477,11 @@ pub fn act(app: &mut CadApp, action: &str) {
             paste(app, None);
             Ok(Value::Null)
         }
+        ["report"] => app.run("reportupdate", json!({ "handles": [h] })).inspect(|r| {
+            if let Some(m) = r.get("message").and_then(Value::as_str) {
+                app.session.echo(m.to_string());
+            }
+        }),
         ["merge"] => app.run("table.merge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
         ["unmerge"] => app.run("table.unmerge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
         ["row", "above"] => app.run("table.insertrow", json!({ "handle": h, "row": r0 })),
@@ -726,6 +736,28 @@ mod tests {
         let _ = a.session.input(cadcraft_engine::Input::Text("5".into()));
         assert!(!a.session.prompting());
         assert!(table(&a, h).is_some_and(|t| t.row_grow == cadcraft_engine::doc::RowGrow::Step(5.0)));
+    }
+
+    #[test]
+    fn a_report_table_updates_from_its_menus() {
+        let mut a = CadApp::new(Session::new(), Services::default());
+        let _ = a.run("circle", json!({ "center": [0, 0], "radius": 1 }));
+        let def = json!({ "columns": ["n"], "from": "circle", "group": [], "row": ["{count}"] });
+        let r = a.run("report", json!({ "definition": def, "at": [20, 0] })).unwrap_or_default();
+        let h = r["table"].as_str().and_then(Handle::parse_hex).unwrap_or(Handle(0));
+        let has = |a: &CadApp, id: &str| entries(a).is_some_and(|g| g.iter().flatten().any(|e| matches!(e, Entry::Item { id: i, .. } if i == id)));
+        // A plain table has no Update Report; a report table has, for its cells and as an object.
+        let (plain, _) = app();
+        assert!(!has(&plain, "cell:report"));
+        let centre = table(&a, h).and_then(|t| t.cell_rects(1, 0).first().map(|b| (b.min + b.max) * 0.5)).unwrap_or_default();
+        click(&mut a, centre, 0.01, false);
+        assert!(has(&a, "cell:report"));
+        let _ = a.run("circle", json!({ "center": [5, 0], "radius": 1 }));
+        act(&mut a, "report");
+        assert_eq!(cells(&a, h).last().and_then(|r| r.first()).map(|c| c.text.clone()).as_deref(), Some("2"));
+        a.canvas.cells = None;
+        a.session.set_selection(vec![h]);
+        assert!(crate::context_menu::object_entries(&a).iter().any(|e| matches!(e, Entry::Item { id, .. } if id == "reportupdate")));
     }
 
     #[test]

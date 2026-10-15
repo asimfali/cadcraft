@@ -75,6 +75,9 @@ pub fn parse_polar_text(text: &str, angles: &crate::units::AngleSettings) -> Opt
 pub enum Picker {
     /// A hatch pattern by name (see [`crate::pattern_choices`]); holds the current pattern.
     HatchPattern(String),
+    /// A file to open: the UI can offer its file dialog, filtered to these extensions (lower
+    /// case, no dot); the chosen path is entered as text.
+    OpenFile { title: String, extensions: Vec<String> },
 }
 
 impl Prompt {

@@ -181,6 +181,7 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
         header: false,
         breaks: None,
         data_link: None,
+        report: None,
         row_grow: t.row_grow,
         row_min: Vec::new(),
     }

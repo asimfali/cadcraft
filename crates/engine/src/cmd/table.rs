@@ -6,7 +6,9 @@ mod cells;
 mod clip;
 mod content;
 pub(crate) mod formula;
+mod report;
 
+pub(crate) use breaks::parse_csv;
 pub(crate) use cells::{recalc, tablestyle_cell_style};
 
 use cadcraft_doc::{EntityKind, Handle, Table, TableCell};
@@ -42,6 +44,7 @@ pub fn specs() -> Vec<CommandSpec> {
     .chain(content::specs())
     .chain(clip::specs())
     .chain(breaks::specs())
+    .chain(report::specs())
     .collect()
 }
 

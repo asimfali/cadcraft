@@ -49,6 +49,7 @@ pub mod viewcube;
 pub mod vpscale;
 
 pub mod exchange;
+mod file_prompt;
 
 use std::sync::mpsc::Receiver;
 
@@ -189,6 +190,8 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// A file to open of one of these extensions (title, extensions): a report definition.
+    pub pick_file: Option<Box<dyn Fn(&str, &[String]) -> Option<String>>>,
 }
 
 pub struct CadApp {
@@ -639,6 +642,7 @@ impl CadApp {
         });
         dialogs::show(self, ui.ctx());
         palettes::patterns::prompt_picker(self, ui.ctx());
+        file_prompt::show(self, ui.ctx());
         closing::prompt(self, ui.ctx());
         autosave::show(self, ui.ctx());
         autosave::gpu_notice(self, ui.ctx());

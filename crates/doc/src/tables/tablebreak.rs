@@ -63,6 +63,35 @@ pub struct DataLink {
     pub start_row: usize,
 }
 
+/// Longest report definition a table keeps (bytes).
+pub const MAX_REPORT_BYTES: usize = 64 << 10;
+/// Most objects a table's report names.
+pub const MAX_REPORT_HANDLES: usize = 100_000;
+
+/// The report a table's data rows come from (REPORT): what it reads and how, so that
+/// REPORTUPDATE can make the rows again from the drawing as it is now.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TableReport {
+    /// The report file it was made from, read again on update; empty: none.
+    pub file: String,
+    /// The report definition (JSON), used when there is no file or it can't be read.
+    pub definition: String,
+    /// The first data row: the rows above it (title, header) stay as they are on update.
+    pub start_row: usize,
+    /// The objects it reads; empty: every object of the drawing.
+    pub handles: Vec<crate::Handle>,
+}
+
+impl TableReport {
+    /// Within the limits a hostile file could break: no report when it is larger.
+    pub fn sanitized(self) -> Option<TableReport> {
+        (self.file.len() <= 4096 && self.definition.len() <= MAX_REPORT_BYTES && self.handles.len() <= MAX_REPORT_HANDLES)
+            .then_some(self)
+            .filter(|r| !r.file.trim().is_empty() || !r.definition.trim().is_empty())
+    }
+}
+
 /// One part of a (broken) table: the rows it shows, top to bottom, and its insertion point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TablePart {

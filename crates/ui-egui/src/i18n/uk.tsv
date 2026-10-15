@@ -1382,3 +1382,12 @@
 	Copy Table Cells	Копіювати комірки таблиці
 	Paste Table Cells	Вставити комірки таблиці
 	Clear Table Cells	Очистити комірки таблиці
+# Report tables (REPORT, REPORTUPDATE).
+	Report Table...	Таблиця-звіт...
+	Update Report Tables	Оновити таблиці-звіти
+	Update Report	Оновити звіт
+	Enter report file name	Введіть ім’я файлу звіту
+	Select objects to report on <All>	Виберіть об’єкти для звіту <Усі>
+	Select report tables to update <All>	Виберіть таблиці-звіти для оновлення <Усі>
+	Report definition	Опис звіту
+	Browse...	Огляд...

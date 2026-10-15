@@ -541,6 +541,8 @@ pub struct LastUsed {
     pub mleader: MLeaderOptions,
     /// MLEADER's block content name (Options > Content type > Block).
     pub mleader_block: String,
+    /// REPORT's report definition file.
+    pub report_file: String,
 }
 
 impl Default for LastUsed {
@@ -553,6 +555,7 @@ impl Default for LastUsed {
             matchprop: cmd::MatchProps::default(),
             mleader: MLeaderOptions::default(),
             mleader_block: String::new(),
+            report_file: String::new(),
         }
     }
 }

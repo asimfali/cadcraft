@@ -1060,3 +1060,12 @@
 	Copy Table Cells	Копировать ячейки таблицы
 	Paste Table Cells	Вставить ячейки таблицы
 	Clear Table Cells	Очистить ячейки таблицы
+# Report tables (REPORT, REPORTUPDATE).
+	Report Table...	Таблица-отчёт...
+	Update Report Tables	Обновить таблицы-отчёты
+	Update Report	Обновить отчёт
+	Enter report file name	Введите имя файла отчёта
+	Select objects to report on <All>	Выберите объекты для отчёта <Все>
+	Select report tables to update <All>	Выберите таблицы-отчёты для обновления <Все>
+	Report definition	Описание отчёта
+	Browse...	Обзор...

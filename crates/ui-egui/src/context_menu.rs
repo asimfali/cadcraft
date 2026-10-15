@@ -154,6 +154,9 @@ fn object_commands(app: &CadApp) -> Vec<(&'static str, Option<&'static str>)> {
         EntityKind::MLeader(_) => vec![("mleaderedit", None)],
         EntityKind::Viewport(_) => vec![("vpclip", None)],
         EntityKind::Image(_) => vec![("imageclip", None)],
+        EntityKind::Table(_) if ents.iter().any(|e| matches!(&e.kind, EntityKind::Table(t) if t.report.is_some())) => {
+            vec![("reportupdate", Some("Update Report"))]
+        }
         _ => Vec::new(),
     }
 }

@@ -215,7 +215,7 @@ pub(crate) fn parse_csv(text: &str, sep: char) -> Vec<Vec<String>> {
 
 /// The separator of a linked file: tab for .txt/.tsv, else `;` when the first line has semicolons
 /// but no commas, else `,`.
-fn separator(path: &str, text: &str) -> char {
+pub(super) fn separator(path: &str, text: &str) -> char {
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     if ext == "txt" || ext == "tsv" {
         return '\t';
@@ -225,7 +225,7 @@ fn separator(path: &str, text: &str) -> char {
 }
 
 /// Read a linked file through the host (natively the file system; not on the web).
-fn read_link(id: &str, path: &str) -> Result<String> {
+pub(super) fn read_link(id: &str, path: &str) -> Result<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let meta = std::fs::metadata(path).map_err(|e| bad(id, format!("{path}: {e}")))?;

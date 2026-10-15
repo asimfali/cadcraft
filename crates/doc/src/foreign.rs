@@ -88,4 +88,46 @@ impl Foreign {
     pub fn data_store_entities(&self) -> std::collections::BTreeSet<Handle> {
         self.data_store.iter().filter(|t| t.code == 320).filter_map(|t| Handle::parse_hex(t.value.trim())).collect()
     }
+
+    /// The kept objects by handle, for looking many of them up.
+    pub fn object_index(&self) -> std::collections::HashMap<Handle, &ForeignObject> {
+        self.objects.iter().map(|o| (o.handle, o)).collect()
+    }
+
+    /// The XRECORDs in the extension dictionary of `entity`: (key, data groups), in dictionary
+    /// order. `index` is [`Foreign::object_index`].
+    pub fn xrecords(&self, index: &std::collections::HashMap<Handle, &ForeignObject>, entity: Handle) -> Vec<(String, Vec<RawTag>)> {
+        let Some(dict) = self.entities.get(&entity).and_then(|x| x.xdict).and_then(|h| index.get(&h)) else { return Vec::new() };
+        let mut out = Vec::new();
+        let mut key: Option<&str> = None;
+        for t in dict.tags.iter().take(MAX_DICT_GROUPS) {
+            match t.code {
+                3 => key = Some(t.value.as_str()),
+                350 | 360 => {
+                    let rec = key.take().zip(Handle::parse_hex(&t.value)).and_then(|(k, h)| Some((k, index.get(&h)?)));
+                    if let Some((k, o)) = rec.filter(|(_, o)| o.kind == "XRECORD") {
+                        out.push((k.to_string(), o.xrecord_data().to_vec()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+/// Most groups of a dictionary read when looking for its entries.
+const MAX_DICT_GROUPS: usize = 100_000;
+
+impl ForeignObject {
+    /// An XRECORD's data groups: those after its `100 AcDbXrecord` subclass marker and the
+    /// duplicate record cloning flag (280) that follows it.
+    pub fn xrecord_data(&self) -> &[RawTag] {
+        let Some(i) = self.tags.iter().position(|t| t.code == 100 && t.value.trim().eq_ignore_ascii_case("AcDbXrecord")) else { return &[] };
+        let rest = self.tags.get(i + 1..).unwrap_or(&[]);
+        match rest.first() {
+            Some(t) if t.code == 280 => rest.get(1..).unwrap_or(&[]),
+            _ => rest,
+        }
+    }
 }

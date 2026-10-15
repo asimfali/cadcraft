@@ -963,6 +963,9 @@ pub struct Table {
     /// The CSV file the cells come from (DATALINK).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_link: Option<crate::DataLink>,
+    /// The report the data rows come from (REPORT).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<crate::TableReport>,
     /// How rows grow to fit their text.
     #[serde(default, skip_serializing_if = "crate::RowGrow::is_free")]
     pub row_grow: crate::RowGrow,
