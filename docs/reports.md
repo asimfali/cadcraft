@@ -65,6 +65,7 @@ Without `at` or `table` the command only returns `{columns, rows}`.
 | `title` | The table's title row. |
 | `columns` | Header texts, or `{header, width}`. No headers: no header row. A column without a width is as wide as its longest text. |
 | `rowHeight` | Height of the data rows. |
+| `blockLibrary` | A drawing file (DWG/DXF) with sketch blocks (see Wire sketches). |
 | `template` | A [table template](table-templates.md) file (relative to the report file) or the template itself: it gives the table its header, columns, text and lines; the report gives the rows. |
 | `lookups` | Tables by name: `{"file": "x.csv"}` (comma, semicolon or tab separated, header row first) or `.json` (a list of objects), or `{"rows": [...]}`. |
 | `sections` | Parts of the report, one after the other. A definition without `sections` is one section. |
@@ -95,6 +96,19 @@ cell (a wire list's Sketch column). Identical wires share one block (`SKETCH_…
 | `unit` | Written after each length (`" см"`). |
 | `width` | The sketch's width before it is scaled into the cell (default 120). |
 | `insulated`, `strip`, `mm` | Words of the notes (default `(insulated)`, `strip`, `mm`). |
+| `block` | Templates naming a block shown instead of the drawn sketch, the first that gives a name: `["{xr.SK}", "{sk}"]` (the wire's own, else a rule's). For cables, harnesses and other wires drawn once by hand. |
+| `attribs`, `props` | That block's attribute values and dynamic properties: `{"LEN": "{xr.L} см"}`. |
+
+Blocks the drawing lacks come from the definition's `blockLibrary`: a DWG or DXF file of sketch
+blocks (relative to the report file), copied with the blocks, layers and styles they use. Names
+found nowhere are reported at the command line, and their cells stay empty. Rules are a lookup
+table, where an empty cell or `*` matches any value and `*`/`?` make a pattern:
+
+```
+layer;color;c1;c2;block
+Olflex;115;;;Cable OLFLEX 7x0.5
+ПВС*;;;;Harness
+```
 
 Codes: the first letter picks the terminal (`Н`/`H` blade, `В`/`B` fork, `К`/`K` ring, `НВН`
 blade with a second contact), a final `И` adds the insulated note, `Z12` (or `З12`) is a stripped
@@ -120,7 +134,8 @@ A wire list:
 }
 ```
 
-A lookup's `default` is a template too (`"{layer}"`: the layer's name when no row matches).
+In a lookup row, an empty cell or `*` matches any value, and a value with `*` or `?` is a
+pattern. A lookup's `default` is a template too (`"{layer}"`: the layer's name when no row matches).
 
 ### Templates
 

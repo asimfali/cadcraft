@@ -353,3 +353,50 @@ fn a_wire_list_with_sketches() {
     s.execute("reportupdate", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().blocks.len(), blocks);
 }
+
+#[test]
+fn sketches_can_be_blocks_by_rule_by_wire_or_from_a_library() {
+    cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
+        write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
+        plot: None,
+    });
+    // A library drawing with the block LIBCABLE (drawn once by hand).
+    let dir = std::env::temp_dir().join(format!("cadcraft-report-lib-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut lib = Session::new();
+    block(&mut lib, "LIBCABLE", &["LEN"]);
+    let bytes = cadcraft_io::write(lib.doc().unwrap(), "lib.dxf").unwrap();
+    std::fs::write(dir.join("sketches.dxf"), bytes).unwrap();
+
+    let mut s = drawing();
+    // A wire of its own: its XRECORD SK names the block, over any rule.
+    wire(&mut s, "ПВ3 1.5", 1, 20.0, &[("L", "50"), ("SK", "NOWHERE")]);
+    let def = json!({
+        "blockLibrary": "sketches.dxf",
+        "lookups": {"rules": {"rows": [{"layer": "ПВ3*", "c1": "", "block": "LIBCABLE"}]}},
+        "from": "lwpolyline",
+        "where": {"xr.L": "?*"},
+        "fields": {"sk": {"lookup": "rules", "match": {"layer": "{layer}", "c1": "{xr.c1}"}, "get": "block"}},
+        "group": ["handle"],
+        "sort": ["{xr.L}"],
+        "row": ["{xr.L}", {"sketch": {"ends": "{xr.c1};{xr.c2}", "lengths": "{xr.L}", "block": ["{xr.SK}", "{sk}"], "attribs": {"LEN": "{xr.L} см"}}}]
+    });
+    std::fs::write(dir.join("wires.json"), def.to_string()).unwrap();
+    let r = s.execute("report", &json!({ "file": dir.join("wires.json").to_string_lossy(), "at": [0, -200] })).unwrap();
+    let t = table(&s, r["table"].as_str().unwrap());
+    // By rule (any ПВ3 wire without a terminal at its start): the library's block, its attribute
+    // filled.
+    assert!(
+        t.cells
+            .iter()
+            .any(|row| row[1].block.as_ref().is_some_and(|b| b.name == "LIBCABLE" && b.attribs.get("LEN").map(String::as_str) == Some("50 см")))
+    );
+    assert!(s.doc().unwrap().block("LIBCABLE").is_some(), "copied from the library");
+    // The wire's own name wins; it is in no file: said so.
+    assert!(t.cells.iter().any(|row| row[1].block.as_ref().is_some_and(|b| b.name == "NOWHERE")));
+    assert!(s.log.iter().any(|l| l.contains("NOWHERE")), "{:?}", s.log);
+    // Other wires (no rule): drawn sketches.
+    assert!(t.cells.iter().any(|row| row[1].block.as_ref().is_some_and(|b| b.name.starts_with("SKETCH_"))));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

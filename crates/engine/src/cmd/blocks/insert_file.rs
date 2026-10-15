@@ -133,6 +133,61 @@ fn define_from(s: &mut Session, src: &Drawing, name: &str) -> Result<String> {
     Ok(name)
 }
 
+/// Copy blocks `names` (any case) and the blocks they use from drawing file `path` into the
+/// drawing, unless it has them; with the layers, linetypes and styles they need. Returns the
+/// names it could not find in the file.
+pub(crate) fn import_blocks(s: &mut Session, path: &str, names: &[String]) -> Result<Vec<String>> {
+    let src = read_drawing(path)?;
+    let mut d = s.doc()?.clone();
+    let mut missing = Vec::new();
+    // The wanted blocks, then what they use, breadth first (bounded by the file's blocks).
+    let mut queue: Vec<String> = Vec::new();
+    for n in names {
+        if d.block(n).is_some() {
+            continue;
+        }
+        match src.blocks.keys().find(|k| k.eq_ignore_ascii_case(n)) {
+            Some(k) => queue.push(k.clone()),
+            None => missing.push(n.clone()),
+        }
+    }
+    let mut i = 0;
+    while let Some(name) = queue.get(i).cloned() {
+        i += 1;
+        if queue.len() > src.blocks.len() {
+            break;
+        }
+        let Some(b) = src.blocks.get(&name) else { continue };
+        for e in b.entities.iter() {
+            if let EntityKind::Insert(ins) = &e.kind
+                && d.block(&ins.block).is_none()
+                && !queue.iter().any(|q| q.eq_ignore_ascii_case(&ins.block))
+                && src.blocks.contains_key(&ins.block)
+            {
+                queue.push(ins.block.clone());
+            }
+        }
+    }
+    if queue.is_empty() {
+        return Ok(missing);
+    }
+    merge_tables(&mut d, &src);
+    let none = BTreeMap::new();
+    for name in &queue {
+        let Some(b) = src.blocks.get(name) else { continue };
+        let mut nb = (**b).clone();
+        nb.entities = Default::default();
+        for e in b.entities.iter() {
+            let e = adopt(&mut d, e, &none);
+            d.ensure_layer(&e.common.layer);
+            nb.entities.push(e);
+        }
+        d.blocks.insert(name.clone(), Arc::new(nb));
+    }
+    *s.doc_mut()? = d;
+    Ok(missing)
+}
+
 /// Add the source's layers, linetypes and styles that this drawing doesn't have (a name that
 /// exists keeps this drawing's definition).
 fn merge_tables(d: &mut Drawing, src: &Drawing) {

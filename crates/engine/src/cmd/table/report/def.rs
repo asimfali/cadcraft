@@ -111,6 +111,25 @@ pub struct SketchDef {
     pub width: f64,
     /// Words of its notes: insulated, strip, mm.
     pub words: (String, String, String),
+    /// Templates naming a block shown instead of the drawn sketch (the first that gives a
+    /// name): a cable or a harness drawn once by hand.
+    pub block: Vec<String>,
+    /// That block's attribute values and dynamic properties, by tag and name: templates.
+    pub attribs: BTreeMap<String, String>,
+    pub props: BTreeMap<String, String>,
+}
+
+/// A JSON object of templates (`{TAG: "{xr.L} см"}`), at most [`MAX_KEYS`].
+fn templates(o: &serde_json::Map<String, Value>, key: &str) -> Res<BTreeMap<String, String>> {
+    match o.get(key) {
+        None | Some(Value::Null) => Ok(BTreeMap::new()),
+        Some(Value::Object(m)) => m
+            .iter()
+            .take(MAX_KEYS)
+            .map(|(k, v)| text(v).map(|t| (k.trim().to_string(), t)).ok_or_else(|| format!("`{key}` values must be templates")))
+            .collect(),
+        Some(_) => Err(format!("`{key}` must be {{name: template}}")),
+    }
 }
 
 fn row_cell(v: &Value) -> Res<RowCell> {
@@ -119,8 +138,19 @@ fn row_cell(v: &Value) -> Res<RowCell> {
     }
     let sk = v.get("sketch").and_then(Value::as_object).ok_or("a row cell must be a template or {sketch: {ends, lengths}}")?;
     let word = |k: &str, d: &str| -> Res<String> { Ok(opt_text(sk, k)?.unwrap_or_else(|| d.to_string())) };
+    let block = match sk.get("block") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(v) => texts(v, "block", MAX_KEYS)?,
+    };
+    let ends = opt_text(sk, "ends")?;
+    if ends.is_none() && block.is_empty() {
+        return Err("a sketch needs `ends` (its terminal codes, `{xr.c1};{xr.c2}`) or `block`".into());
+    }
     Ok(RowCell::Sketch(SketchDef {
-        ends: opt_text(sk, "ends")?.ok_or("a sketch needs `ends`: its terminal codes (`{xr.c1};{xr.c2}`)")?,
+        block,
+        attribs: templates(sk, "attribs")?,
+        props: templates(sk, "props")?,
+        ends: ends.unwrap_or_default(),
         lengths: opt_text(sk, "lengths")?.unwrap_or_default(),
         unit: word("unit", "")?,
         width: positive(sk, "width")?.unwrap_or(120.0),
@@ -139,6 +169,8 @@ pub struct Report {
     /// The table template giving the table its look: a file name (relative to the report
     /// file) or the template itself.
     pub template: Option<Value>,
+    /// A drawing file (DWG/DXF) the sketch blocks come from when the drawing lacks them.
+    pub block_library: Option<String>,
 }
 
 impl Report {
@@ -339,6 +371,7 @@ pub fn parse(v: &Value) -> Res<Report> {
         lookups,
         sections,
         row_height: positive(o, "rowHeight")?,
+        block_library: opt_text(o, "blockLibrary")?.filter(|f| !f.trim().is_empty()),
         template: match o.get("template") {
             None | Some(Value::Null) => None,
             Some(v @ (Value::String(_) | Value::Object(_))) => Some(v.clone()),

@@ -52,6 +52,8 @@ pub enum Row {
 pub struct Out {
     pub text: String,
     pub sketch: Option<super::sketch::Sketch>,
+    /// A block named for the cell instead of the drawn sketch.
+    pub block: Option<cadcraft_doc::CellBlock>,
 }
 
 /// One record: an object and, with `each`, one of its items (text, 1-based index).
@@ -119,7 +121,7 @@ impl Ctx<'_> {
                     let hit = self
                         .lookups
                         .get(table)
-                        .and_then(|rows| rows.iter().find(|row| wanted.iter().all(|(col, v)| row.get(*col).is_some_and(|x| same(x, v)))))
+                        .and_then(|rows| rows.iter().find(|row| wanted.iter().all(|(col, v)| row.get(*col).is_none_or(|x| row_matches(x, v)))))
                         .and_then(|row| row.get(get).cloned());
                     // No row: the default, a template too (`{layer}`).
                     match hit {
@@ -257,6 +259,19 @@ impl Ctx<'_> {
 }
 
 /// Lookup values match when equal as text (any case, trimmed) or as numbers ("02" = "2").
+/// A lookup row's value against the wanted one: empty or `*` is any value, a value with `*` or
+/// `?` a pattern, else [`same`].
+fn row_matches(row: &str, v: &str) -> bool {
+    let r = row.trim();
+    if r.is_empty() || r == "*" {
+        return true;
+    }
+    if r.contains(['*', '?']) {
+        return wildcard(r, v.trim());
+    }
+    same(r, v)
+}
+
 fn same(a: &str, b: &str) -> bool {
     let (a, b) = (a.trim(), b.trim());
     a.eq_ignore_ascii_case(b)
@@ -540,14 +555,26 @@ pub fn run(d: &Drawing, r: &Report, objs: &[&Entity], lookups: &Lookups) -> Resu
             let mut cells = Vec::new();
             for rc in &s.row {
                 cells.push(match rc {
-                    RowCell::Text(t) => Out { text: ctx.group_text(&mut recs, g, t, number), sketch: None },
+                    RowCell::Text(t) => Out { text: ctx.group_text(&mut recs, g, t, number), sketch: None, block: None },
+                    RowCell::Sketch(sd)
+                        if let Some(name) =
+                            sd.block.iter().map(|t| ctx.group_text(&mut recs, g, t, number).trim().to_string()).find(|n| !n.is_empty()) =>
+                    {
+                        let mut eval_map = |m: &BTreeMap<String, String>| -> BTreeMap<String, String> {
+                            m.iter().map(|(k, t)| (k.clone(), ctx.group_text(&mut recs, g, t, number))).collect()
+                        };
+                        let attribs = eval_map(&sd.attribs);
+                        let props = eval_map(&sd.props);
+                        let b = cadcraft_doc::CellBlock { name: name.chars().take(255).collect(), attribs, props, ..Default::default() };
+                        Out { text: name, sketch: None, block: Some(b) }
+                    }
                     RowCell::Sketch(sd) => {
                         let split = |v: String| -> Vec<String> { v.split(';').map(|x| x.trim().to_string()).collect() };
                         let ends = split(ctx.group_text(&mut recs, g, &sd.ends, number));
                         let lengths: Vec<String> =
                             split(ctx.group_text(&mut recs, g, &sd.lengths, number)).into_iter().filter(|x| !x.is_empty()).collect();
                         let sk = super::sketch::Sketch { nodes: ends, lengths, unit: sd.unit.clone(), width: sd.width, words: sd.words.clone() };
-                        Out { text: sk.summary(), sketch: Some(sk) }
+                        Out { text: sk.summary(), sketch: Some(sk), block: None }
                     }
                 });
             }

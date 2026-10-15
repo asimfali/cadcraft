@@ -505,7 +505,7 @@ impl BlockM {
     }
 }
 
-mod insert_file;
+pub(crate) mod insert_file;
 pub(crate) mod xref;
 
 /// Where the command-line INSERT is in its prompt sequence.

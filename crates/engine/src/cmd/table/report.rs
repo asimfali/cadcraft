@@ -29,7 +29,7 @@ use eval::{Lookups, Row};
 
 const PARAMS: &str = "{file?: report definition (.json), definition?: {…} (the definition itself), handles? (objects to read; default: every object), \
      at?: [x,y] (insert a new table), table?: handle (fill this table again), csv?: path (write the rows), title?} → {columns, rows, table?}. \
-     Definition: {title?, template?: table template file | {…} (the table's look, see tabletemplate), columns?: [header | {header, width}], rowHeight?, lookups?: {name: {file} | {rows: [{…}]}}, \
+     Definition: {title?, blockLibrary?: drawing file with sketch blocks, template?: table template file | {…} (the table's look, see tabletemplate), columns?: [header | {header, width}], rowHeight?, lookups?: {name: {file} | {rows: [{…}]}}, \
      sections?: [{title?, from?: \"insert,lwpolyline\", blocks?, layers?, each?: [field], split?, fields?: {name: template | {lookup, match: {col: template}, get, default?}}, \
      where?: {field: pattern (! negates)}, group?: [field], sort?: [field | -field], row: [template per column]}]}. \
      Templates: {field}, {#}, {count}, {sum:field}, {min:…}, {max:…}, {join:…}, {…:N} N decimals. \
@@ -231,14 +231,39 @@ fn rows(s: &Session, id: &str, l: &Loaded, handles: &[Handle]) -> Result<Vec<Row
 }
 
 /// Make the blocks of the rows' wire sketches, their text in `style`.
-fn make_sketches(s: &mut Session, rows: &[Row], style: &str) -> Result<()> {
+/// Blocks named in place of sketches that the drawing lacks are copied from the report's block
+/// library; any still missing are reported at the command line (their cells stay empty).
+fn make_sketches(s: &mut Session, l: &Loaded, rows: &[Row], style: &str) -> Result<()> {
     let d = s.doc_mut()?;
+    let mut named: Vec<String> = Vec::new();
     for r in rows {
         if let Row::Data(v) = r {
-            for sk in v.iter().filter_map(|o| o.sketch.as_ref()) {
-                sketch::ensure_block(d, sk, style);
+            for o in v {
+                if let Some(sk) = &o.sketch {
+                    sketch::ensure_block(d, sk, style);
+                }
+                if let Some(b) = &o.block
+                    && d.block(&b.name).is_none()
+                    && !named.iter().any(|n| n.eq_ignore_ascii_case(&b.name))
+                {
+                    named.push(b.name.clone());
+                }
             }
         }
+    }
+    if named.is_empty() {
+        return Ok(());
+    }
+    let mut missing = named.clone();
+    if let Some(lib) = &l.report.block_library {
+        let path = locate(s, base_dir(s, l.file.as_deref()).as_deref(), lib);
+        match crate::cmd::blocks::insert_file::import_blocks(s, &path, &named) {
+            Ok(m) => missing = m,
+            Err(e) => s.echo(e.to_string()),
+        }
+    }
+    if !missing.is_empty() {
+        s.echo(format!("Blocks not found for the sketches: {}.", missing.join(", ")));
     }
     Ok(())
 }
@@ -275,6 +300,8 @@ fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f6
             let scale = widths.get(c).map(|w| w * 0.94 / sk.width.max(1.0)).filter(|k| k.is_finite() && *k > 0.0);
             TableCell { block: Some(cadcraft_doc::CellBlock { name: sk.block_name(), scale, ..Default::default() }), ..cell(c, String::new()) }
         }
+        // A block named for the cell: fitted into it.
+        Some(eval::Out { block: Some(b), .. }) => TableCell { block: Some(b.clone()), ..cell(c, String::new()) },
         Some(o) => cell(c, o.text.clone()),
         None => cell(c, String::new()),
     };
@@ -457,7 +484,7 @@ fn refill(s: &mut Session, id: &str, h: Handle, l: &Loaded, rows: &[Row], handle
         super::template::make_styles(s.doc_mut()?, &tl.template);
     }
     let style = sketch_style(s, l);
-    make_sketches(s, rows, &style)?;
+    make_sketches(s, l, rows, &style)?;
     edit(s, &json!({ "handle": h.hex() }), id, |t| {
         let start = super::head_rows(t);
         fill(t, start, cols, rows, None);
@@ -508,7 +535,7 @@ fn insert(s: &mut Session, l: &Loaded, rows: &[Row], at: Vec2, handles: &[Handle
         super::template::make_styles(s.doc_mut()?, &tl.template);
     }
     let style = sketch_style(s, l);
-    make_sketches(s, rows, &style)?;
+    make_sketches(s, l, rows, &style)?;
     let mut t = new_table(s, l, rows, at, title);
     let start = l.template.as_ref().map_or(usize::from(t.title) + usize::from(t.header), |tl| tl.template.head_rows());
     t.report = Some(link(l, start, handles));
