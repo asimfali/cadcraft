@@ -275,8 +275,11 @@ impl DocState {
         let Some(be) = &mut self.block_edit else { return Ok(()) };
         let before = be.host.doc.clone();
         let selection = be.host.selection.clone();
-        be.host.push_undo(Snapshot { label: UNDO_LABEL.into(), doc: before, selection });
-        be.host.doc = Arc::new(d);
+        be.host.push_undo(Snapshot { label: UNDO_LABEL.into(), doc: before.clone(), selection });
+        let mut d = Arc::new(d);
+        // Wires attached to the block's connectors follow them, in the same undo step.
+        crate::connect::update(&mut d, &before);
+        be.host.doc = d;
         be.host.revision += 1;
         be.original = original;
         be.saved = editor;

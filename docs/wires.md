@@ -48,3 +48,31 @@ wires already have:
 ```
 
 A colour can be set by its name in this list too (`wire.set {color: "черный"}`).
+
+## Connectors
+
+A block can have **connectors**: named points where wires attach — a contactor's terminals
+(`A1`, `A2`, `13`, `14`), a tee's three ends. A wire end put on a connector is attached to it, and
+when the block reference moves, turns, scales or mirrors, the attached ends go with it.
+
+- **CONNECTOR** (`CONN`), Tools ▸ Wires ▸ Connector: pick a point, then type its name (Enter: the
+  next number); again until Enter. Place connectors in the Block Editor, or among the objects
+  you then make into a block. A connector is a POINT carrying xdata `CADCRAFT_CONNECTOR`
+  (`1000` its name), so AutoCAD and other programs keep it as a point.
+- **Snap.** Whenever object snaps are on (F3), the cursor goes to a block's connector before any
+  other snap point near it; the tip names it (`Connector A1`). The connectors of selected block
+  references, and those in the Block Editor, show as small rings with their names.
+- **Attaching.** Drawing a polyline or line to a connector, or dragging a wire's end grip onto
+  one, attaches that end. Taking the end off the connector lets go. The Properties palette's Wire
+  section shows what each end is attached to (`Start  KM : 14`, `End  KM : A1`).
+- **Following.** When an attached block reference moves (MOVE, ROTATE, SCALE, MIRROR, its grips,
+  or its block definition changes in the Block Editor), the wire end follows its connector in
+  the same undo step. When the segment at that end was horizontal or vertical, the vertex next to
+  it moves along, so the wire keeps its right angles.
+- **Copies.** Copying a block together with its wires attaches the copies to each other; a wire
+  copied alone is not attached. Erasing a block leaves its wires where they are, unattached.
+- The link is xdata `CADCRAFT_LINK` on the wire: `1000 start|end`, `1005` the block reference,
+  `1000` the connector, for each attached end.
+- JSON: `connector {at, name?}`, `connector.set {handle, name? | remove}`,
+  `connector.list {handles?}`; `wire.get` returns `start` and `end` (`{handle, block, name}` or
+  null).

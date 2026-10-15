@@ -46,9 +46,18 @@ pub(crate) fn tip(app: &CadApp, ctx: &egui::Context, h: Handle) -> Option<String
     Some(parts.join(" · "))
 }
 
+/// What a wire end is attached to: "block : connector", or "—".
+fn link_text(d: &cadcraft_engine::doc::Drawing, l: Option<&cadcraft_engine::connect::Link>) -> String {
+    let Some(l) = l else { return "—".into() };
+    match d.entity(l.insert).map(|e| &e.kind) {
+        Some(cadcraft_engine::doc::EntityKind::Insert(i)) => format!("{} : {}", i.block, l.name),
+        _ => l.name.clone(),
+    }
+}
+
 /// A text field with a ▾ list beside it: typed text commits on Enter or leaving the field, a
 /// list item at once.
-fn combo_field(ui: &mut egui::Ui, id: egui::Id, value: &str, items: &[String]) -> Option<String> {
+pub(super) fn combo_field(ui: &mut egui::Ui, id: egui::Id, value: &str, items: &[String]) -> Option<String> {
     let mut buf = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.to_string());
     let te = id.with("te");
     let w = (ui.available_width() - 38.0).max(40.0);
@@ -97,6 +106,17 @@ pub(super) fn section(app: &CadApp, ui: &mut egui::Ui, wires: &[Handle], group: 
     let mut set: Option<Value> = None;
     let mut put = |k: &str, v: Value| set = Some(json!({ "handles": ids, k: v }));
     group(ui, "Wire");
+    // What one wire's ends are attached to (block connectors).
+    if let [h] = wires
+        && let Some(e) = d.entity(*h)
+    {
+        let [start, end] = cadcraft_engine::connect::links(e);
+        for (label, l) in [("Start", start), ("End", end)] {
+            prop_row(ui, label, |ui| {
+                ui.label(link_text(d, l.as_ref()));
+            });
+        }
+    }
     // One chain the wires share (all the same sections), else `None`.
     let chain = ws.first().map(Chain::of).filter(|c0| ws.iter().all(|w| Chain::of(w) == *c0));
     let mut new_chain: Option<Chain> = None;

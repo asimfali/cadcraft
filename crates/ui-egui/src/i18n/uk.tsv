@@ -1435,3 +1435,10 @@
 	+ Section	+ ділянка
 	− Section	− ділянка
 	More than two terminals: a chain of sections	Більше двох наконечників: ланцюжок ділянок
+# Connectors (CONNECTOR, the wire ends attached to them).
+	Connector	З'єднувач
+	Set Connector	Задати з'єднувач
+	List Connectors	Список з'єднувачів
+	Specify connector point	Вкажіть точку з'єднувача
+	Enter connector name	Введіть ім'я з'єднувача
+	End	Кінець

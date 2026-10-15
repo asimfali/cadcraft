@@ -44,7 +44,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(WireM::default()))),
         CommandSpec::new("wire.set", "Set Wire Data", run_set).params(SET_PARAMS),
         CommandSpec::new("wire.get", "Wire Data", run_get)
-            .params("{handles? (default: the selection)} → [{handle, length, c1, c2, number, type, color}]")
+            .params("{handles? (default: the selection)} → [{handle, length, c1, c2, number, type, color, start, end (attached to: {handle, block, name} | null)}]")
             .noundo(),
         CommandSpec::new("wire.choices", "Wire Data Choices", run_choices)
             .params(
@@ -209,9 +209,11 @@ fn run_get(s: &mut Session, p: &Value) -> Result<Value> {
         .iter()
         .filter_map(|h| {
             let w = data(d, *h)?;
+            let [start, end] = d.entity(*h).map(|e| crate::connect::links(e)).unwrap_or_default();
+            let link = |l: Option<crate::connect::Link>| l.map_or(Value::Null, |l| super::connector::link_json(d, &l));
             Some(json!({
                 "handle": h.hex(), "length": w.length, "c1": w.c1, "c2": w.c2, "number": w.number,
-                "type": w.layer, "color": w.color.to_aci(),
+                "type": w.layer, "color": w.color.to_aci(), "start": link(start), "end": link(end),
             }))
         })
         .collect();

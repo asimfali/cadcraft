@@ -7,6 +7,7 @@ mod array;
 mod audit;
 pub(crate) mod blocks;
 pub mod clipboard;
+mod connector;
 pub mod constraints;
 mod draw;
 mod draw2;
@@ -205,6 +206,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(constraints::specs());
         v.extend(lisp::specs());
         v.extend(wire::specs());
+        v.extend(connector::specs());
         v
     })
 }

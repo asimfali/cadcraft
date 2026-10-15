@@ -849,6 +849,18 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     };
     let wires: Vec<cadcraft_engine::doc::Handle> = sel.iter().copied().filter(is_wire).collect();
     let wire_set = if !wires.is_empty() && wires.len() == sel.len() { wire::section(app, ui, &wires, &group) } else { None };
+    // A connector point (in a block, or in the Block Editor): its name.
+    let mut connector_set: Option<Value> = None;
+    if let [h] = sel.as_slice()
+        && let Some(name) = d.entity(*h).and_then(|e| cadcraft_engine::connect::connector_name(e))
+    {
+        group(ui, "Connector");
+        prop_row(ui, "Name", |ui| {
+            if let Some(v) = wire::combo_field(ui, egui::Id::new(("connector-name", h.hex())), &name, &[]) {
+                connector_set = Some(json!({ "handle": h.hex(), "name": v }));
+            }
+        });
+    }
     group(ui, "General");
     prop_row(ui, "Color", |ui| {
         ui.menu_button(format!("■ {}", crate::i18n::t(&color)), |ui| {
@@ -1102,6 +1114,11 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     if let Some(p) = wire_set
         && let Err(e) = app.run("wire.set", p)
+    {
+        app.session.echo(e);
+    }
+    if let Some(p) = connector_set
+        && let Err(e) = app.run("connector.set", p)
     {
         app.session.echo(e);
     }

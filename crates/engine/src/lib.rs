@@ -13,6 +13,7 @@ pub mod audit;
 pub mod autosave;
 pub mod blockedit;
 pub mod cmd;
+pub mod connect;
 mod finite;
 pub mod grip_dims;
 pub mod grips;
@@ -1304,7 +1305,8 @@ impl Session {
     /// The post-command passes, in order, run after every command — by [`Session::execute`] and
     /// when an interactive command finishes — so their edits land in the command's own undo step:
     /// group membership is pruned, constraints are inferred, purged and re-solved, and
-    /// associative dimensions and hatches follow their sources. A new pass is added here, once.
+    /// associative dimensions and hatches follow their sources, and wires their connectors. A new
+    /// pass is added here, once.
     ///
     /// `before` is the drawing the command started from; `uid` (when known) is the document it
     /// started in, so associativity is not applied across a document switch; `ok` is false for a
@@ -1313,6 +1315,7 @@ impl Session {
         cmd::groups::after_command(self, before);
         cmd::constraints::after_command(self, before, ok);
         assoc::after_command(self, before, uid);
+        connect::after_command(self, before, uid);
     }
 
     fn resume_suspended(&mut self) {

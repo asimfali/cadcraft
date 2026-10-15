@@ -27,6 +27,7 @@ pub mod spacemouse;
 // The External References palette.
 pub mod xrefs;
 
+pub mod connectors;
 pub mod dyngrips;
 pub mod dyninput;
 pub mod gpu;

@@ -31,6 +31,9 @@ pub mod mode {
     pub const OFF: u32 = 16384;
     /// Not an OSMODE bit: snaps also find hatch objects (OSNAPHATCH = 1).
     pub const HATCH: u32 = 1 << 16;
+    /// Not an OSMODE bit: block connectors (`crate::connect`), on whenever snaps are; a wire's
+    /// end goes there first.
+    pub const CONN: u32 = 1 << 17;
     pub const ALL: [(u32, &str); 14] = [
         (END, "Endpoint"),
         (MID, "Midpoint"),
@@ -119,6 +122,9 @@ pub enum LineEnd {
 }
 
 fn name_of(m: u32) -> &'static str {
+    if m == mode::CONN {
+        return "Connector";
+    }
     mode::ALL.iter().find(|(b, _)| *b == m).map(|(_, n)| *n).unwrap_or("Snap")
 }
 
@@ -392,6 +398,9 @@ fn gather_in(
                 _ => {}
             }
         }
+        if osmode & mode::CONN != 0 {
+            cands.extend(crate::connect::connectors_of(d, e).into_iter().map(|(_, p)| (mode::CONN, p)));
+        }
         let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims };
         sink.object(&e.kind, None);
         // A block reference snaps to the objects inside it, placed by its transform.
@@ -484,7 +493,12 @@ fn finish(
 }
 
 fn snap_score(mode: u32, point: Vec2, cursor: Vec2, aperture: f64) -> f64 {
-    point.dist(cursor) - if mode == mode::INT || mode == mode::END { aperture * 0.15 } else { 0.0 }
+    point.dist(cursor)
+        - match mode {
+            mode::CONN => aperture,
+            mode::INT | mode::END => aperture * 0.15,
+            _ => 0.0,
+        }
 }
 
 /// Upper bound on the block-reference objects one snap query looks at (hostile files).

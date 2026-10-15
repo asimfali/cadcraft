@@ -20,7 +20,10 @@ fn wire_data_is_set_read_undone_and_kept_in_dxf() {
     let (a, b) = (pline(&mut s, 0.0), pline(&mut s, 10.0));
     s.execute("wire.set", &json!({ "handles": [a, b], "length": "60", "c1": "Н1И", "c2": "В1", "type": "МПО 0.5", "color": 2 })).unwrap();
     s.execute("wire.set", &json!({ "handles": [b], "length": "40;35" })).unwrap();
-    assert_eq!(get(&mut s, &a), json!({"handle": a, "length": "60", "c1": "Н1И", "c2": "В1", "number": "", "type": "МПО 0.5", "color": 2}));
+    assert_eq!(
+        get(&mut s, &a),
+        json!({"handle": a, "length": "60", "c1": "Н1И", "c2": "В1", "number": "", "type": "МПО 0.5", "color": 2, "start": null, "end": null})
+    );
     assert_eq!(get(&mut s, &b)["length"], "40;35");
     assert!(s.doc().unwrap().layer("МПО 0.5").is_some(), "the type's layer is made");
     // Undo takes the last change back.

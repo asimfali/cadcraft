@@ -1113,3 +1113,10 @@
 	+ Section	+ участок
 	− Section	− участок
 	More than two terminals: a chain of sections	Больше двух наконечников: цепочка участков
+# Connectors (CONNECTOR, the wire ends attached to them).
+	Connector	Соединитель
+	Set Connector	Задать соединитель
+	List Connectors	Список соединителей
+	Specify connector point	Укажите точку соединителя
+	Enter connector name	Введите имя соединителя
+	End	Конец

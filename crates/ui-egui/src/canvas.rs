@@ -1057,7 +1057,7 @@ fn selection_area_fill(s: &cadcraft_engine::Settings, crossing: bool) -> Option<
     s.selectionarea.then(|| Color32::from_rgb(c.0, c.1, c.2).gamma_multiply(f32::from(s.selectionareaopacity.min(100)) / 100.0))
 }
 
-fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
+fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit, label: Option<&str>) {
     let t = Tokens::get();
     let s = crate::theme::snap_marker_half();
     let st = Stroke::new(2.0, t.snap);
@@ -1095,6 +1095,10 @@ fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
             p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
             p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
         }
+        mode::CONN => {
+            p.circle_stroke(at, s, st);
+            p.circle_filled(at, s * 0.4, t.snap);
+        }
         mode::INS => {
             p.line(
                 vec![
@@ -1113,8 +1117,8 @@ fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
             p.line(vec![at + vec2(-s, -s), at + vec2(s, -s), at + vec2(-s, s), at + vec2(s, s), at + vec2(-s, -s)], st);
         }
     }
-    p.text(at + vec2(12.0, 12.0), egui::Align2::LEFT_TOP, crate::i18n::t(hit.name), crate::theme::small(), Color32::BLACK);
-    let galley = p.layout_no_wrap(crate::i18n::t(hit.name).to_string(), crate::theme::small(), Color32::BLACK);
+    let text = label.map_or_else(|| crate::i18n::t(hit.name).to_string(), str::to_string);
+    let galley = p.layout_no_wrap(text, crate::theme::small(), Color32::BLACK);
     let r = Rect::from_min_size(at + vec2(10.0, 10.0), galley.size() + vec2(6.0, 2.0));
     p.rect_filled(r, 2.0, Color32::from_rgb(0xff, 0xff, 0xe1));
     p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
@@ -1846,6 +1850,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
     }
+    crate::connectors::draw(app, &painter, &xf, rect);
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
     let drag = match (app.canvas.cursor, app.canvas.gpu.is_some()) {
@@ -1895,7 +1900,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
-        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
+        let label = if hit.mode == snap::mode::CONN { crate::connectors::snap_label(app, hit.point, view.height) } else { None };
+        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit, label.as_deref());
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
