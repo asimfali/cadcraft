@@ -234,6 +234,25 @@ fn shown_bounds(d: &Drawing, blk: &Block, ins: &Insert, vis: &CellVisibility) ->
     b
 }
 
+/// Where a placed cell block draws (world coordinates): what its visibility state shows and its
+/// visible attributes.
+pub fn placed_cell_block_bounds(d: &Drawing, pb: &PlacedCellBlock) -> Bounds2 {
+    match d.block(&pb.insert.block) {
+        Some(blk) => shown_bounds(d, blk, &pb.insert, &pb.visibility),
+        None => Bounds2::EMPTY,
+    }
+}
+
+/// The size (width, height) cell block `cb` draws at scale 1, or `None` when its block is
+/// missing or draws nothing.
+pub fn cell_block_size(d: &Drawing, cb: &CellBlock) -> Option<Vec2> {
+    let one = CellBlock { scale: Some(1.0), ..cb.clone() };
+    let big = Vec2::new(1e6, 1e6);
+    let pb = place_cell_block(d, &one, cell_visibility(d, &one), -big, big, Vec2::ZERO, 5)?;
+    let b = placed_cell_block_bounds(d, &pb);
+    (!b.is_empty()).then(|| Vec2::new(b.width(), b.height()))
+}
+
 /// Place cell block `cb` in the cell spanning `min` … `max` (world coordinates), inside margins
 /// `margin` (horizontal, vertical), aligned by `attach` (MTEXT numbering, 1 top left … 9 bottom
 /// right): fitted into the cell unless it has its own scale. `None` when the block is missing.

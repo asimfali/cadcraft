@@ -230,6 +230,26 @@ fn rows(s: &Session, id: &str, l: &Loaded, handles: &[Handle]) -> Result<Vec<Row
     Ok(rows)
 }
 
+/// The widths (at scale 1) of the blocks the rows name, by upper-case name.
+type BlockSizes = std::collections::HashMap<String, f64>;
+
+fn block_sizes(d: &Drawing, rows: &[Row]) -> BlockSizes {
+    let mut out = BlockSizes::new();
+    for r in rows {
+        if let Row::Data(v) = r {
+            for b in v.iter().filter_map(|o| o.block.as_ref()) {
+                let key = b.name.to_uppercase();
+                if !out.contains_key(&key)
+                    && let Some(sz) = cadcraft_doc::cell_block_size(d, b)
+                {
+                    out.insert(key, sz.x);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Make the blocks of the rows' wire sketches, their text in `style`.
 /// Blocks named in place of sketches that the drawing lacks are copied from the report's block
 /// library; any still missing are reported at the command line (their cells stay empty).
@@ -279,7 +299,7 @@ fn sketch_style(s: &Session, l: &Loaded) -> String {
 
 /// Put `rows` into `t` from row `start` on, in `cols` columns. The new rows look like the
 /// first data row was (its height and its cells' formats); merges below `start` go.
-fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f64>) {
+fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f64>, sizes: &BlockSizes) {
     let cols = cols.clamp(1, MAX_COLS);
     let start = start.min(t.cells.len());
     let model: Vec<TableCell> = t.cells.get(start).cloned().unwrap_or_default();
@@ -300,8 +320,15 @@ fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f6
             let scale = widths.get(c).map(|w| w * 0.94 / sk.width.max(1.0)).filter(|k| k.is_finite() && *k > 0.0);
             TableCell { block: Some(cadcraft_doc::CellBlock { name: sk.block_name(), scale, ..Default::default() }), ..cell(c, String::new()) }
         }
-        // A block named for the cell: fitted into it.
-        Some(eval::Out { block: Some(b), .. }) => TableCell { block: Some(b.clone()), ..cell(c, String::new()) },
+        // A block named for the cell: as drawn, made smaller only to fit the column; the row
+        // grows for its height.
+        Some(eval::Out { block: Some(b), .. }) => {
+            let fit = sizes.get(&b.name.to_uppercase()).zip(widths.get(c)).map(|(w, cw)| if *w > 0.0 { (cw * 0.94 / w).min(1.0) } else { 1.0 });
+            TableCell {
+                block: Some(cadcraft_doc::CellBlock { scale: fit.filter(|k| k.is_finite() && *k > 0.0), ..b.clone() }),
+                ..cell(c, String::new())
+            }
+        }
         Some(o) => cell(c, o.text.clone()),
         None => cell(c, String::new()),
     };
@@ -356,7 +383,8 @@ fn new_table(s: &Session, l: &Loaded, rows: &[Row], at: Vec2, title: Option<&str
             c.text = text.to_string();
         }
         let head = tpl.head_rows();
-        fill(&mut t, head, r.column_count().max(tpl.columns.len()), rows, tpl.row_height.or(r.row_height));
+        let sizes = s.doc().map(|d| block_sizes(d, rows)).unwrap_or_default();
+        fill(&mut t, head, r.column_count().max(tpl.columns.len()), rows, tpl.row_height.or(r.row_height), &sizes);
         super::template::data_looks(&mut t, tpl, head);
         return t;
     }
@@ -381,7 +409,8 @@ fn new_table(s: &Session, l: &Loaded, rows: &[Row], at: Vec2, title: Option<&str
         }
     }
     // `make_table` gave a plain table an empty row: the data replaces it.
-    fill(&mut t, start, cols, rows, Some(data_h));
+    let sizes = s.doc().map(|d| block_sizes(d, rows)).unwrap_or_default();
+    fill(&mut t, start, cols, rows, Some(data_h), &sizes);
     // The other columns as wide as their longest text.
     for (c, w) in t.col_widths.iter_mut().enumerate() {
         if fixed.get(c).copied().flatten().is_some() {
@@ -485,9 +514,10 @@ fn refill(s: &mut Session, id: &str, h: Handle, l: &Loaded, rows: &[Row], handle
     }
     let style = sketch_style(s, l);
     make_sketches(s, l, rows, &style)?;
+    let sizes = block_sizes(s.doc()?, rows);
     edit(s, &json!({ "handle": h.hex() }), id, |t| {
         let start = super::head_rows(t);
-        fill(t, start, cols, rows, None);
+        fill(t, start, cols, rows, None, &sizes);
         if let Some(tl) = &l.template {
             super::template::data_looks(t, &tl.template, start);
             t.template = Some(tl.link.clone());

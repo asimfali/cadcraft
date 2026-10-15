@@ -55,6 +55,8 @@ pub struct TableBlock {
     pub row: usize,
     pub col: usize,
     pub block: PlacedCellBlock,
+    /// The cell's margin across the text (above and below the block).
+    pub pad: f64,
 }
 
 /// Everything a table draws, in world coordinates.
@@ -350,7 +352,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
         let (x0, x1, y0, y1) = (x_at(a.col), x_at(a.col + a.cols), y_at(a.row), y_at(a.row + a.rows));
         let (min, max) = (p(x0, y1), p(x1, y0));
         if let Some(block) = cadcraft_doc::place_cell_block(d, cb, visibility(cb), min, max, Vec2::new(margin_h, margin_v), align) {
-            g.blocks.push(TableBlock { row: a.row, col: a.col, block });
+            g.blocks.push(TableBlock { row: a.row, col: a.col, block, pad: margin_v });
         }
     }
     // Texts at their alignment point inside the margins (a cell with a block shows the block).
@@ -415,7 +417,25 @@ fn style_ink(c: Color, table: Ink) -> Ink {
 pub fn table_row_needs(d: &Drawing, t: &Table) -> (Vec<f64>, Vec<(usize, usize, f64)>) {
     let mut needs = vec![0.0; t.row_heights.len().min(10_000)];
     let mut spans = Vec::new();
-    for tx in &layout(d, t).texts {
+    let g = layout(d, t);
+    // A block at its own scale needs its height (one fitted into the cell needs nothing).
+    for b in &g.blocks {
+        let cell = t.cells.get(b.row).and_then(|r| r.get(b.col));
+        if !cell.and_then(|c| c.block.as_ref()).is_some_and(|cb| cb.scale.is_some()) {
+            continue;
+        }
+        let need = cadcraft_doc::placed_cell_block_bounds(d, &b.block).height() + 2.0 * b.pad;
+        if !need.is_finite() || need <= 0.0 {
+            continue;
+        }
+        let rows = cell.and_then(|c| c.merged).map_or(1, |(rs, _)| rs.max(1) as usize);
+        if rows > 1 {
+            spans.push((b.row, rows, need));
+        } else if let Some(n) = needs.get_mut(b.row) {
+            *n = f64::max(*n, need);
+        }
+    }
+    for tx in &g.texts {
         if tx.rotation.sin().abs() > 0.5 {
             continue;
         }

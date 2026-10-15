@@ -99,6 +99,10 @@ cell (a wire list's Sketch column). Identical wires share one block (`SKETCH_…
 | `block` | Templates naming a block shown instead of the drawn sketch, the first that gives a name: `["{xr.SK}", "{sk}"]` (the wire's own, else a rule's). For cables, harnesses and other wires drawn once by hand. |
 | `attribs`, `props` | That block's attribute values and dynamic properties: `{"LEN": "{xr.L} см"}`. |
 
+Such a block is shown as drawn (1:1), made smaller only when it is wider than the column; the row
+grows for its height (as the table's row growth allows: freely, in steps or not at all). Draw
+sketch blocks at the size they should print.
+
 Blocks the drawing lacks come from the definition's `blockLibrary`: a DWG or DXF file of sketch
 blocks (relative to the report file), copied with the blocks, layers and styles they use. Names
 found nowhere are reported at the command line, and their cells stay empty. Rules are a lookup

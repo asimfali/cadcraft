@@ -400,3 +400,36 @@ fn sketches_can_be_blocks_by_rule_by_wire_or_from_a_library() {
     assert!(t.cells.iter().any(|row| row[1].block.as_ref().is_some_and(|b| b.name.starts_with("SKETCH_"))));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn rows_grow_for_tall_sketch_blocks() {
+    let mut s = Session::new();
+    // TALL: 40 × 40; WIDE: 200 × 10. Both drawn at 1:1.
+    s.execute("circle", &json!({"center": [0, 0], "radius": 20})).unwrap();
+    s.execute("selectall", &json!({})).unwrap();
+    s.execute("block", &json!({"name": "TALL", "base": [0, 0], "keep": "delete"})).unwrap();
+    s.execute("rectang", &json!({"p1": [0, 0], "p2": [200, 10]})).unwrap();
+    s.execute("selectall", &json!({})).unwrap();
+    s.execute("block", &json!({"name": "WIDE", "base": [0, 0], "keep": "delete"})).unwrap();
+    s.execute("line", &json!({"points": [[0, 0], [1, 0]]})).unwrap();
+    s.execute("line", &json!({"points": [[0, 5], [1, 5]]})).unwrap();
+    // A rule per line: the first shows TALL, the second WIDE.
+    let hs: Vec<String> = s.doc().unwrap().model.iter().map(|e| e.handle.hex()).collect();
+    let def = json!({
+        "columns": [{"header": "Sketch", "width": 100}],
+        "rowHeight": 8,
+        "lookups": {"names": {"rows": [{"h": hs[0], "b": "TALL"}, {"h": hs[1], "b": "WIDE"}]}},
+        "from": "line",
+        "fields": {"name": {"lookup": "names", "match": {"h": "{handle}"}, "get": "b"}},
+        "sort": ["{starty}"],
+        "row": [{"sketch": {"block": "{name}"}}]
+    });
+    let r = s.execute("report", &json!({ "definition": def, "at": [0, 100] })).unwrap();
+    let t = table(&s, r["table"].as_str().unwrap());
+    let (tall, wide) = (&t.cells[1][0], &t.cells[2][0]);
+    assert_eq!(tall.block.as_ref().and_then(|b| b.scale), Some(1.0), "as drawn");
+    assert!(t.row_heights[1] >= 40.0, "the row grew for the block: {}", t.row_heights[1]);
+    let k = wide.block.as_ref().and_then(|b| b.scale).unwrap();
+    assert!((k - 94.0 / 200.0).abs() < 1e-6, "made smaller to fit the column: {k}");
+    assert!(t.row_heights[2] < 10.0, "{}", t.row_heights[2]);
+}
