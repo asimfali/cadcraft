@@ -10,7 +10,7 @@
 use cadcraft_color::Color;
 use cadcraft_doc::{
     CellBlock, CellBorder, CellEdges, CellLook, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, RowGrow, Table, TableBreak,
-    TableReport, TableStyle,
+    TableReport, TableStyle, TableTemplateLink,
 };
 use cadcraft_dxf::Tag;
 use serde::{Deserialize, Serialize};
@@ -205,6 +205,9 @@ struct TableExtra {
     /// The report the data rows come from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     report: Option<TableReport>,
+    /// The template it was laid out by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    template: Option<TableTemplateLink>,
 }
 
 /// Largest report definition written next to a report file: AutoCAD keeps at most 16 KB of
@@ -213,6 +216,15 @@ const MAX_REPORT_COPY: usize = 8 << 10;
 
 /// A table's report as written: without its copy of a large definition when it names a file.
 fn report_xdata(r: &TableReport) -> TableReport {
+    let mut r = r.clone();
+    if !r.file.trim().is_empty() && r.definition.len() > MAX_REPORT_COPY {
+        r.definition.clear();
+    }
+    r
+}
+
+/// A table's template as written: without its copy of a large template when it names a file.
+fn template_xdata(r: &TableTemplateLink) -> TableTemplateLink {
     let mut r = r.clone();
     if !r.file.trim().is_empty() && r.definition.len() > MAX_REPORT_COPY {
         r.definition.clear();
@@ -234,6 +246,7 @@ pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
         grow: t.row_grow,
         mins: if t.row_min.len() == t.row_heights.len() { t.row_min.clone() } else { Vec::new() },
         report: t.report.as_ref().map(report_xdata),
+        template: t.template.as_ref().map(template_xdata),
     };
     for (r, row) in t.cells.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
@@ -261,6 +274,7 @@ pub(crate) fn table_xdata(t: &Table) -> Vec<String> {
         && x.grow.is_free()
         && x.mins.is_empty()
         && x.report.is_none()
+        && x.template.is_none()
     {
         return Vec::new();
     }
@@ -286,6 +300,7 @@ pub(crate) fn read_table_xdata(tags: &[Tag], t: &mut Table) {
     });
     t.data_link = x.link.filter(|l| !l.path.trim().is_empty() && l.path.len() <= 4096);
     t.report = x.report.and_then(TableReport::sanitized);
+    t.template = x.template.and_then(TableTemplateLink::sanitized);
     for (r, c, b) in x.blocks {
         let b = b.sanitized();
         if let Some(cell) = t.cells.get_mut(r).and_then(|row| row.get_mut(c))

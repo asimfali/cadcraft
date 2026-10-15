@@ -966,6 +966,9 @@ pub struct Table {
     /// The report the data rows come from (REPORT).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<crate::TableReport>,
+    /// The template the table was laid out by (TABLETEMPLATE).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<crate::TableTemplateLink>,
     /// How rows grow to fit their text.
     #[serde(default, skip_serializing_if = "crate::RowGrow::is_free")]
     pub row_grow: crate::RowGrow,

@@ -7,6 +7,7 @@ mod clip;
 mod content;
 pub(crate) mod formula;
 mod report;
+mod template;
 
 pub(crate) use breaks::parse_csv;
 pub(crate) use cells::{recalc, tablestyle_cell_style};
@@ -45,6 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
     .chain(clip::specs())
     .chain(breaks::specs())
     .chain(report::specs())
+    .chain(template::specs())
     .collect()
 }
 
@@ -203,6 +205,20 @@ pub(crate) fn fit_rows(d: &cadcraft_doc::Drawing, t: &mut Table) {
     t.fit_rows(&needs, &spans);
 }
 
+/// The rows above a table's data: a report's, else the title and header rows (a template's
+/// header may have several, kept as rows in the Title or Header cell style).
+pub(crate) fn head_rows(t: &Table) -> usize {
+    if let Some(r) = &t.report {
+        return r.start_row.min(t.cells.len());
+    }
+    let styled = t
+        .row_styles
+        .iter()
+        .take_while(|s| s.eq_ignore_ascii_case(cadcraft_doc::CellStyle::TITLE) || s.eq_ignore_ascii_case(cadcraft_doc::CellStyle::HEADER))
+        .count();
+    styled.max(usize::from(t.title) + usize::from(t.header)).min(t.cells.len())
+}
+
 /// Make the cell grid rows × cols.
 fn normalize(t: &mut Table) {
     let rows = t.row_heights.len().min(MAX_ROWS);
@@ -325,7 +341,23 @@ fn run_insert_row(s: &mut Session, p: &Value) -> Result<Value> {
             t.row_min.insert(r, h);
         }
         t.row_heights.insert(r, h);
-        t.cells.insert(r, vec![TableCell::default(); t.col_widths.len()]);
+        // The new row looks like its neighbour among the data rows (the one above, or the
+        // first data row when it goes right under the header).
+        let head = head_rows(t);
+        let src = if r > head {
+            Some(r - 1)
+        } else if r == head {
+            Some(r)
+        } else {
+            None
+        };
+        let row: Vec<TableCell> = (0..t.col_widths.len())
+            .map(|c| match src.and_then(|i| t.cells.get(i)).and_then(|row| row.get(c)) {
+                Some(n) => TableCell { style: n.style.clone(), text_height: n.text_height, edges: n.edges, look: n.look, ..TableCell::default() },
+                None => TableCell::default(),
+            })
+            .collect();
+        t.cells.insert(r, row);
         if r < t.row_styles.len() {
             t.row_styles.insert(r, String::new());
         }

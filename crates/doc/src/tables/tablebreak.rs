@@ -83,6 +83,26 @@ pub struct TableReport {
     pub handles: Vec<crate::Handle>,
 }
 
+/// The table template a table was laid out by (TABLETEMPLATE): its file and a copy of it, so
+/// that it can be laid out again and a report keeps its look.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TableTemplateLink {
+    /// The template file; empty: none.
+    pub file: String,
+    /// The template (JSON).
+    pub definition: String,
+}
+
+impl TableTemplateLink {
+    /// Within the limits a hostile file could break: none when it is larger.
+    pub fn sanitized(self) -> Option<TableTemplateLink> {
+        (self.file.len() <= 4096 && self.definition.len() <= MAX_REPORT_BYTES)
+            .then_some(self)
+            .filter(|r| !r.file.trim().is_empty() || !r.definition.trim().is_empty())
+    }
+}
+
 impl TableReport {
     /// Within the limits a hostile file could break: no report when it is larger.
     pub fn sanitized(self) -> Option<TableReport> {

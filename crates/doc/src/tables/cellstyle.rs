@@ -236,6 +236,7 @@ impl Default for Table {
             breaks: None,
             data_link: None,
             report: None,
+            template: None,
             row_grow: crate::RowGrow::Free,
             row_min: Vec::new(),
         }

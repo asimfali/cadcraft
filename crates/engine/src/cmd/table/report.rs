@@ -28,7 +28,7 @@ use eval::{Lookups, Row};
 
 const PARAMS: &str = "{file?: report definition (.json), definition?: {…} (the definition itself), handles? (objects to read; default: every object), \
      at?: [x,y] (insert a new table), table?: handle (fill this table again), csv?: path (write the rows), title?} → {columns, rows, table?}. \
-     Definition: {title?, columns?: [header | {header, width}], rowHeight?, lookups?: {name: {file} | {rows: [{…}]}}, \
+     Definition: {title?, template?: table template file | {…} (the table's look, see tabletemplate), columns?: [header | {header, width}], rowHeight?, lookups?: {name: {file} | {rows: [{…}]}}, \
      sections?: [{title?, from?: \"insert,lwpolyline\", blocks?, layers?, each?: [field], split?, fields?: {name: template | {lookup, match: {col: template}, get, default?}}, \
      where?: {field: pattern (! negates)}, group?: [field], sort?: [field | -field], row: [template per column]}]}. \
      Templates: {field}, {#}, {count}, {sum:field}, {min:…}, {max:…}, {join:…}, {…:N} N decimals. \
@@ -49,12 +49,12 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// The directory relative file names are read from: the report file's, else the drawing's.
-fn base_dir(s: &Session, file: Option<&str>) -> Option<PathBuf> {
+pub(super) fn base_dir(s: &Session, file: Option<&str>) -> Option<PathBuf> {
     let from_file = file.and_then(|f| Path::new(f).parent()).filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf);
     from_file.or_else(|| s.state().ok()?.path.as_deref().and_then(|p| Path::new(p).parent()).map(Path::to_path_buf))
 }
 
-fn resolve(base: Option<&Path>, path: &str) -> String {
+pub(super) fn resolve(base: Option<&Path>, path: &str) -> String {
     let p = Path::new(path.trim());
     match base {
         Some(b) if p.is_relative() => b.join(p).to_string_lossy().into_owned(),
@@ -67,6 +67,8 @@ struct Loaded {
     value: Value,
     report: Report,
     file: Option<String>,
+    /// The table template the report names.
+    template: Option<super::template::Loaded>,
 }
 
 fn parse_definition(id: &str, text: &str, from: &str) -> Result<Value> {
@@ -86,7 +88,18 @@ fn load(s: &Session, id: &str, p: &Value) -> Result<Loaded> {
         Some(_) => return Err(bad(id, "`definition` must be a JSON object")),
     };
     let report = def::parse(&value).map_err(|m| bad(id, m))?;
-    Ok(Loaded { value, report, file })
+    let template = match &report.template {
+        None => None,
+        Some(t) => {
+            let base = base_dir(s, file.as_deref());
+            let p = match t {
+                Value::String(f) => json!({ "file": f }),
+                other => json!({ "template": other }),
+            };
+            Some(super::template::load(s, id, &p, base.as_deref())?)
+        }
+    };
+    Ok(Loaded { value, report, file, template })
 }
 
 /// The rows of a lookup file: CSV with a header row, or a JSON list of objects.
@@ -192,8 +205,23 @@ fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f6
 
 /// A new table for report `l` at `at`.
 fn new_table(s: &Session, l: &Loaded, rows: &[Row], at: Vec2, title: Option<&str>) -> Table {
-    let st = style_of(s);
     let r = &l.report;
+    if let Some(tl) = &l.template {
+        // The template gives the head, the columns and the look; the report the rows.
+        let tpl = &tl.template;
+        let mut t = super::template::new_table(tpl, at, 0, Some(tl.link.clone()));
+        if let Some(text) = title.or(r.title.as_deref())
+            && t.title
+            && let Some(c) = t.cells.first_mut().and_then(|row| row.first_mut())
+        {
+            c.text = text.to_string();
+        }
+        let head = tpl.head_rows();
+        fill(&mut t, head, r.column_count().max(tpl.columns.len()), rows, tpl.row_height.or(r.row_height));
+        super::template::data_looks(&mut t, tpl, head);
+        return t;
+    }
+    let st = style_of(s);
     let cols = r.column_count();
     let header = r.has_header().then(|| (0..cols).map(|c| r.columns.get(c).map(|x| x.header.clone()).unwrap_or_default()).collect());
     let title = title.or(r.title.as_deref());
@@ -299,14 +327,18 @@ fn table_handle(p: &Value) -> Option<Handle> {
 
 /// Fill the data rows of report table `h` again with `rows`, keeping what it knows of `l`.
 fn refill(s: &mut Session, id: &str, h: Handle, l: &Loaded, rows: &[Row], handles: &[Handle]) -> Result<()> {
-    let cols = l.report.column_count();
+    let cols = l.report.column_count().max(l.template.as_ref().map_or(0, |tl| tl.template.columns.len()));
+    // The template's lines and text as they are now (its head stays as the user left it).
+    if let Some(tl) = &l.template {
+        super::template::make_styles(s.doc_mut()?, &tl.template);
+    }
     edit(s, &json!({ "handle": h.hex() }), id, |t| {
-        let start = match &t.report {
-            Some(r) => r.start_row,
-            None => usize::from(t.title) + usize::from(t.header),
-        }
-        .min(t.cells.len());
+        let start = super::head_rows(t);
         fill(t, start, cols, rows, None);
+        if let Some(tl) = &l.template {
+            super::template::data_looks(t, &tl.template, start);
+            t.template = Some(tl.link.clone());
+        }
         t.report = Some(link(l, start, handles));
         Ok(())
     })?;
@@ -318,7 +350,15 @@ fn run_report(s: &mut Session, p: &Value) -> Result<Value> {
     let l = load(s, id, p)?;
     let handles = handles_param(id, p)?;
     let rows = rows(s, id, &l, &handles)?;
-    let columns: Vec<String> = (0..l.report.column_count()).map(|c| l.report.columns.get(c).map(|x| x.header.clone()).unwrap_or_default()).collect();
+    // Column names: the template's headers when it has them, else the report's.
+    let tcols = l.template.as_ref().map(|tl| &tl.template.columns).filter(|c| c.iter().any(|x| !x.header.is_empty()));
+    let ncols = l.report.column_count().max(tcols.map_or(0, Vec::len));
+    let columns: Vec<String> = (0..ncols)
+        .map(|c| match tcols {
+            Some(tc) => tc.get(c).map(|x| x.header.clone()).unwrap_or_default(),
+            None => l.report.columns.get(c).map(|x| x.header.clone()).unwrap_or_default(),
+        })
+        .collect();
     let mut out = json!({ "columns": columns, "rows": rows_json(&rows) });
     if let Some(path) = str_param(p, "csv").map(str::trim).filter(|f| !f.is_empty()) {
         let path = resolve(base_dir(s, None).as_deref(), path);
@@ -338,8 +378,11 @@ fn run_report(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Insert a new report table.
 fn insert(s: &mut Session, l: &Loaded, rows: &[Row], at: Vec2, handles: &[Handle], title: Option<&str>) -> Result<Handle> {
+    if let Some(tl) = &l.template {
+        super::template::make_styles(s.doc_mut()?, &tl.template);
+    }
     let mut t = new_table(s, l, rows, at, title);
-    let start = usize::from(t.title) + usize::from(t.header);
+    let start = l.template.as_ref().map_or(usize::from(t.title) + usize::from(t.header), |tl| tl.template.head_rows());
     t.report = Some(link(l, start, handles));
     normalize(&mut t);
     fit_rows(s.doc()?, &mut t);

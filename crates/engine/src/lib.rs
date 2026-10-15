@@ -543,6 +543,8 @@ pub struct LastUsed {
     pub mleader_block: String,
     /// REPORT's report definition file.
     pub report_file: String,
+    /// TABLETEMPLATE's table template file.
+    pub template_file: String,
 }
 
 impl Default for LastUsed {
@@ -556,6 +558,7 @@ impl Default for LastUsed {
             mleader: MLeaderOptions::default(),
             mleader_block: String::new(),
             report_file: String::new(),
+            template_file: String::new(),
         }
     }
 }

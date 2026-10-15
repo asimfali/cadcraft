@@ -39,6 +39,7 @@ fn table() -> Table {
         breaks: Default::default(),
         data_link: Default::default(),
         report: None,
+        template: None,
         row_grow: Default::default(),
         row_min: Default::default(),
     }

@@ -1249,10 +1249,12 @@ fn report_tables_keep_their_report() {
         start_row: 2,
         handles: vec![c],
     });
+    t.template = Some(cadcraft_doc::TableTemplateLink { file: "C:/templates/gost.json".into(), definition: r#"{"columns":[{"width":5}]}"#.into() });
     d.add(&Space::Model, Common::default(), EntityKind::Table(t.clone())).unwrap();
     let back = roundtrip(&d);
     let got = first(&back, |k| if let EntityKind::Table(x) = k { Some(x.clone()) } else { None });
     assert_eq!(got.report, t.report);
+    assert_eq!(got.template, t.template);
     assert!(matches!(back.entity(c).map(|e| &e.kind), Some(EntityKind::Circle(_))), "the objects it reads keep their handles");
     // A large definition next to its file stays in the file.
     let mut big = t.clone();

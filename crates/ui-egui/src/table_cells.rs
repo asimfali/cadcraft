@@ -391,10 +391,13 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         item("Delete Columns", format!("{CELL}col:delete")),
     ];
     let mut groups = vec![clip, cell, content, merge, vec![sub("Rows", rows), sub("Columns", cols)]];
-    // A report table fills its data rows again from the drawing.
+    // A report table fills its data rows again from the drawing; any table can take a template.
+    let mut table_items = Vec::new();
     if table(app, sel.table).is_some_and(|t| t.report.is_some()) {
-        groups.push(vec![item("Update Report", format!("{CELL}report"))]);
+        table_items.push(item("Update Report", format!("{CELL}report")));
     }
+    table_items.push(item("Apply Table Template...", format!("{CELL}template")));
+    groups.push(table_items);
     Some(groups)
 }
 
@@ -482,6 +485,13 @@ pub fn act(app: &mut CadApp, action: &str) {
                 app.session.echo(m.to_string());
             }
         }),
+        // TABLETEMPLATE on the table: it asks for the template file.
+        ["template"] => {
+            app.canvas.cells = None;
+            app.session.set_selection(vec![sel.table]);
+            app.start("tabletemplate");
+            Ok(Value::Null)
+        }
         ["merge"] => app.run("table.merge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
         ["unmerge"] => app.run("table.unmerge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),
         ["row", "above"] => app.run("table.insertrow", json!({ "handle": h, "row": r0 })),
@@ -757,7 +767,15 @@ mod tests {
         assert_eq!(cells(&a, h).last().and_then(|r| r.first()).map(|c| c.text.clone()).as_deref(), Some("2"));
         a.canvas.cells = None;
         a.session.set_selection(vec![h]);
-        assert!(crate::context_menu::object_entries(&a).iter().any(|e| matches!(e, Entry::Item { id, .. } if id == "reportupdate")));
+        let objects = crate::context_menu::object_entries(&a);
+        assert!(objects.iter().any(|e| matches!(e, Entry::Item { id, .. } if id == "reportupdate")));
+        assert!(objects.iter().any(|e| matches!(e, Entry::Item { id, .. } if id == "tabletemplate")));
+        // Apply Table Template... on picked cells asks for the template file.
+        click(&mut a, centre, 0.01, false);
+        assert!(has(&a, "cell:template"));
+        act(&mut a, "template");
+        assert!(a.session.prompting());
+        assert_eq!(a.session.selection(), vec![h]);
     }
 
     #[test]

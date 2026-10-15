@@ -102,6 +102,9 @@ pub struct Report {
     pub lookups: BTreeMap<String, LookupSource>,
     pub sections: Vec<Section>,
     pub row_height: Option<f64>,
+    /// The table template giving the table its look: a file name (relative to the report
+    /// file) or the template itself.
+    pub template: Option<Value>,
 }
 
 impl Report {
@@ -300,6 +303,11 @@ pub fn parse(v: &Value) -> Res<Report> {
         lookups,
         sections,
         row_height: positive(o, "rowHeight")?,
+        template: match o.get("template") {
+            None | Some(Value::Null) => None,
+            Some(v @ (Value::String(_) | Value::Object(_))) => Some(v.clone()),
+            Some(_) => return Err("`template` must be a template file name or a template".into()),
+        },
     })
 }
 

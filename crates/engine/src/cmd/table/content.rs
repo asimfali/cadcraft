@@ -485,7 +485,7 @@ fn scope_cells(
     labels: bool,
 ) -> std::result::Result<(usize, usize, usize, usize), String> {
     let (nr, nc) = (t.cells.len(), t.col_widths.len());
-    let data = if labels { 0 } else { (usize::from(t.title) + usize::from(t.header)).min(nr) };
+    let data = if labels { 0 } else { super::head_rows(t).min(nr) };
     Ok(match scope.trim().to_ascii_lowercase().as_str() {
         "" | "cell" => (r, 1, c, 1),
         "column" | "col" => (data, nr - data, c, 1),

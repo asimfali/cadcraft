@@ -65,6 +65,7 @@ Without `at` or `table` the command only returns `{columns, rows}`.
 | `title` | The table's title row. |
 | `columns` | Header texts, or `{header, width}`. No headers: no header row. A column without a width is as wide as its longest text. |
 | `rowHeight` | Height of the data rows. |
+| `template` | A [table template](table-templates.md) file (relative to the report file) or the template itself: it gives the table its header, columns, text and lines; the report gives the rows. |
 | `lookups` | Tables by name: `{"file": "x.csv"}` (comma, semicolon or tab separated, header row first) or `.json` (a list of objects), or `{"rows": [...]}`. |
 | `sections` | Parts of the report, one after the other. A definition without `sections` is one section. |
 
