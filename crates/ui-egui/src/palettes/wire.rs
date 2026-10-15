@@ -3,7 +3,7 @@
 //! all of them at once (`*VARIES*` where they differ), as WIRE does at the command line. The
 //! lists come from `wires.json` and the drawing (`wire.choices`).
 
-use cadcraft_engine::cmd::wire::{self, Choices, WireData};
+use cadcraft_engine::cmd::wire::{self, Chain, Choices, WireData};
 use cadcraft_engine::doc::Handle;
 use serde_json::{Value, json};
 
@@ -97,19 +97,80 @@ pub(super) fn section(app: &CadApp, ui: &mut egui::Ui, wires: &[Handle], group: 
     let mut set: Option<Value> = None;
     let mut put = |k: &str, v: Value| set = Some(json!({ "handles": ids, k: v }));
     group(ui, "Wire");
-    let fields: [(&str, &str, String, &[String]); 4] = [
-        ("Length", "length", shared(&ws, |w| w.length.clone()), &c.lengths),
-        ("Terminal 1", "c1", shared(&ws, |w| w.c1.clone()), &c.terminals),
-        ("Terminal 2", "c2", shared(&ws, |w| w.c2.clone()), &c.terminals),
-        ("Number", "number", shared(&ws, |w| w.number.clone()), &[]),
-    ];
-    for (label, k, value, items) in fields {
-        prop_row(ui, label, |ui| {
-            if let Some(v) = combo_field(ui, key(k), &value, items) {
-                put(k, json!(v));
+    // One chain the wires share (all the same sections), else `None`.
+    let chain = ws.first().map(Chain::of).filter(|c0| ws.iter().all(|w| Chain::of(w) == *c0));
+    let mut new_chain: Option<Chain> = None;
+    match &chain {
+        // Several sections: node, section length, node… with + and − for sections.
+        Some(ch) if ch.sections() > 1 => {
+            let mut edited = ch.clone();
+            let mut changed = false;
+            for i in 0..ch.nodes.len() {
+                let node = ch.nodes.get(i).cloned().unwrap_or_default();
+                prop_row(ui, &format!("{} {}", crate::i18n::t("Node"), i + 1), |ui| {
+                    if let Some(v) = combo_field(ui, key(&format!("node{i}")), &node, &c.terminals)
+                        && let Some(n) = edited.nodes.get_mut(i)
+                    {
+                        *n = v;
+                        changed = true;
+                    }
+                });
+                if let Some(len) = ch.lengths.get(i).cloned() {
+                    prop_row(ui, &format!("↓ {}", crate::i18n::t("Length")), |ui| {
+                        if let Some(v) = combo_field(ui, key(&format!("len{i}")), &len, &[])
+                            && let Some(l) = edited.lengths.get_mut(i)
+                        {
+                            *l = v;
+                            changed = true;
+                        }
+                    });
+                }
             }
-        });
+            prop_row(ui, "Sections", |ui| {
+                if ui.button(crate::tl!("+ Section")).clicked() {
+                    edited.add();
+                    changed = true;
+                }
+                if ui.button(crate::tl!("− Section")).clicked() {
+                    edited.remove();
+                    changed = true;
+                }
+            });
+            if changed {
+                new_chain = Some(edited);
+            }
+        }
+        _ => {
+            let fields: [(&str, &str, String, &[String]); 3] = [
+                ("Length", "length", shared(&ws, |w| w.length.clone()), &c.lengths),
+                ("Terminal 1", "c1", shared(&ws, |w| w.c1.clone()), &c.terminals),
+                ("Terminal 2", "c2", shared(&ws, |w| w.c2.clone()), &c.terminals),
+            ];
+            for (label, k, value, items) in fields {
+                prop_row(ui, label, |ui| {
+                    if let Some(v) = combo_field(ui, key(k), &value, items) {
+                        put(k, json!(v));
+                    }
+                });
+            }
+            // A plain wire becomes a chain: one more section.
+            if let Some(ch) = &chain {
+                prop_row(ui, "Sections", |ui| {
+                    if ui.button(crate::tl!("+ Section")).on_hover_text(crate::tl!("More than two terminals: a chain of sections")).clicked() {
+                        let mut more = ch.clone();
+                        more.add();
+                        new_chain = Some(more);
+                    }
+                });
+            }
+        }
     }
+    let number = shared(&ws, |w| w.number.clone());
+    prop_row(ui, "Number", |ui| {
+        if let Some(v) = combo_field(ui, key("number"), &number, &[]) {
+            put("number", json!(v));
+        }
+    });
     // Type: the layer (the list's types, else the drawing's layers).
     let types: Vec<String> = if c.types.is_empty() { d.layers.iter().map(|l| l.name.clone()).collect() } else { c.types.clone() };
     let ty = shared(&ws, |w| w.layer.clone());
@@ -140,5 +201,10 @@ pub(super) fn section(app: &CadApp, ui: &mut egui::Ui, wires: &[Handle], group: 
             });
         });
     });
+    // A chain's sections changed: all three fields at once.
+    if let Some(ch) = new_chain {
+        let (length, c1, c2) = ch.fields();
+        return Some(json!({ "handles": ids, "length": length, "c1": c1, "c2": c2 }));
+    }
     set
 }

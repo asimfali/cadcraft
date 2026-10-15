@@ -19,6 +19,10 @@ The data is kept as wire-list add-ins for AutoCAD keep it, so drawings go back a
 - **Properties palette.** Select wires: the Wire section (first) shows their length, terminals,
   number, type and colour, `*VARIES*` where they differ. Type a value (Enter or leaving the field
   keeps it) or pick it from the ▾ list; it goes to every selected wire at once.
+- **Chains.** A wire through more than two terminals is a chain of sections (`7;7;7` with four
+  terminals). With one wire selected (or wires with the same sections), the palette lists the
+  chain: each node's terminal and each section's length, with **+ Section** and **− Section**; a
+  plain wire becomes a chain with + Section.
 - **Hover.** A wire with data shows it under the cursor: `Wire 5 · 60 · Н1И → В1 · МПО 0.5 · yellow`.
 - **WIRE** (`WD`), Tools ▸ Wires ▸ Wire Data..., or the right-click menu of a polyline or line:
   select wires, then type the length, or `Start`, `End`, `Number`, `Type`, `Color` for the other

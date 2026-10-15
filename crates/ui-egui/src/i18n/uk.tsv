@@ -1431,3 +1431,7 @@
 	Enter wire color	Введіть колір дроту
 	Enter first wire number	Введіть перший номер дроту
 	Select wire	Виберіть дріт
+	Sections	Ділянки
+	+ Section	+ ділянка
+	− Section	− ділянка
+	More than two terminals: a chain of sections	Більше двох наконечників: ланцюжок ділянок

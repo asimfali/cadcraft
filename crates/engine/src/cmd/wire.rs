@@ -75,6 +75,61 @@ pub struct WireData {
     pub color: Color,
 }
 
+/// Most sections of a chain.
+pub const MAX_SECTIONS: usize = 100;
+
+/// A wire as a chain: its nodes (the terminal at each) and the length of each section between
+/// them — one section for a plain wire. Kept as the add-ins keep it: `L` the lengths, `c1` the
+/// node at the start of each section, `c2` the last node, all `;`-separated.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Chain {
+    /// Sections + 1 nodes.
+    pub nodes: Vec<String>,
+    pub lengths: Vec<String>,
+}
+
+impl Chain {
+    pub fn of(w: &WireData) -> Chain {
+        let split = |s: &str| -> Vec<String> { s.split(';').take(MAX_SECTIONS + 1).map(|x| x.trim().to_string()).collect() };
+        let lengths = split(&w.length);
+        let n = lengths.len().max(1);
+        let mut nodes: Vec<String> = split(&w.c1);
+        nodes.resize(n, String::new());
+        nodes.push(w.c2.trim().to_string());
+        Chain { nodes, lengths }
+    }
+
+    pub fn sections(&self) -> usize {
+        self.lengths.len()
+    }
+
+    /// The `wire.set` fields: length, c1, c2.
+    pub fn fields(&self) -> (String, String, String) {
+        let n = self.lengths.len();
+        let starts: Vec<&str> = self.nodes.iter().take(n).map(String::as_str).collect();
+        (self.lengths.join(";"), starts.join(";"), self.nodes.get(n).cloned().unwrap_or_default())
+    }
+
+    /// One more section at the end, like the last one (its length, its end terminal).
+    pub fn add(&mut self) {
+        if self.lengths.len() >= MAX_SECTIONS {
+            return;
+        }
+        let len = self.lengths.last().cloned().unwrap_or_default();
+        let end = self.nodes.last().cloned().unwrap_or_default();
+        self.lengths.push(len);
+        self.nodes.push(end);
+    }
+
+    /// The last section off (a wire keeps one).
+    pub fn remove(&mut self) {
+        if self.lengths.len() > 1 {
+            self.lengths.pop();
+            self.nodes.pop();
+        }
+    }
+}
+
 /// The data of wire `h` (`None`: not a wire).
 pub fn data(d: &cadcraft_doc::Drawing, h: Handle) -> Option<WireData> {
     let e = d.entity(h).filter(|e| is_wire(&e.kind))?;
@@ -507,5 +562,32 @@ impl Interactive for NumberM {
             }
             _ => Ok(Step::Continue),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn w(length: &str, c1: &str, c2: &str) -> WireData {
+        WireData { length: length.into(), c1: c1.into(), c2: c2.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn chains_read_and_write_the_add_in_fields() {
+        let c = Chain::of(&w("7;7;7", "В1;В1;В1", "В1"));
+        assert_eq!((c.nodes.len(), c.sections()), (4, 3));
+        assert_eq!(c.fields(), ("7;7;7".into(), "В1;В1;В1".into(), "В1".into()));
+        // A plain wire is one section.
+        let mut p = Chain::of(&w("60", "Н1И", "В1"));
+        assert_eq!(p.nodes, ["Н1И", "В1"]);
+        p.add();
+        assert_eq!(p.fields(), ("60;60".into(), "Н1И;В1".into(), "В1".into()));
+        p.remove();
+        p.remove();
+        assert_eq!(p.fields(), ("60".into(), "Н1И".into(), "В1".into()));
+        // Too few starts: padded with bare nodes.
+        assert_eq!(Chain::of(&w("19;16", "Z12", "Н1И")).nodes, ["Z12", "", "Н1И"]);
+        assert_eq!(Chain::of(&w("", "", "")).fields(), (String::new(), String::new(), String::new()));
     }
 }

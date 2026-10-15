@@ -1109,3 +1109,7 @@
 	Enter wire color	Введите цвет провода
 	Enter first wire number	Введите первый номер провода
 	Select wire	Выберите провод
+	Sections	Участки
+	+ Section	+ участок
+	− Section	− участок
+	More than two terminals: a chain of sections	Больше двух наконечников: цепочка участков
