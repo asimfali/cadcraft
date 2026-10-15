@@ -22,6 +22,13 @@ pub fn specs() -> Vec<CommandSpec> {
                  spacing?, resetPositions?: bool} → {parts}",
             )
             .interactive(|_| Ok(Box::new(BreakM::default()))),
+        // The same at the command line and in the table's menu (dotted ids are hidden there).
+        CommandSpec::new("tablebreak", "Table Breaks...", run_break)
+            .alias(&["tbr"])
+            .params(
+                "{handle, enabled?, height?, heights?, spacing?, direction?, repeatTop?, repeatBottom?, resetPositions?} (as table.break) → {parts}",
+            )
+            .interactive(|_| Ok(Box::new(BreakM::default()))),
         CommandSpec::new("datalink", "Data Link...", run_datalink)
             .menu(&["Insert", "Data Link..."])
             .params("{handle, path (.csv, .txt/.tsv tab-separated), startRow? (default: below the title), remove?: bool} → {rows, cols}"),
@@ -99,20 +106,51 @@ fn run_break(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handle": r["handle"], "parts": parts }))
 }
 
-/// `table.break` at the command line: select a table, then the part height (or Off).
+/// TABLEBREAK at the command line: select a table (or have one selected), then the part height,
+/// or Off, or First for a first part of its own height (a first sheet with a taller title
+/// block).
 #[derive(Default)]
 struct BreakM {
     table: Option<Handle>,
+    /// Asking for the first part's height.
+    first: bool,
 }
 
 impl Interactive for BreakM {
     fn name(&self) -> &'static str {
         "TABLEBREAK"
     }
-    fn prompt(&self, _s: &Session) -> Prompt {
-        match self.table {
-            None => Prompt::new("Select a table", Accept::SELECT),
-            Some(_) => Prompt::new("Enter maximum part height or", Accept::POINT_OR_NUMBER).kw(&["Off"]),
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        if s.settings.pickfirst {
+            let d = s.doc()?;
+            self.table = s.selection().into_iter().find(|h| d.entity(*h).is_some_and(|e| matches!(e.kind, EntityKind::Table(_))));
+        }
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        let current = |first: bool| {
+            let d = s.doc().ok()?;
+            let EntityKind::Table(t) = &d.entity(self.table?)?.kind else { return None };
+            let b = t.breaks.as_ref().filter(|b| b.enabled)?;
+            let v = if first { b.heights.first().copied().unwrap_or(b.height) } else { b.height };
+            (v > 0.0).then(|| super::report::fmt_height(v))
+        };
+        match (self.table, self.first) {
+            (None, _) => Prompt::new("Select a table", Accept::SELECT),
+            (Some(_), true) => {
+                let p = Prompt::new("Enter height of the first part", Accept::POINT_OR_NUMBER);
+                match current(true) {
+                    Some(v) => p.default(v),
+                    None => p,
+                }
+            }
+            (Some(_), false) => {
+                let p = Prompt::new("Enter maximum part height or", Accept::POINT_OR_NUMBER).kw(&["Off", "First"]);
+                match current(false) {
+                    Some(v) => p.default(v),
+                    None => p,
+                }
+            }
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -140,6 +178,23 @@ impl Interactive for BreakM {
             (None, Input::Enter) => Ok(Step::Cancel),
             (None, _) => Ok(Step::Continue),
             (Some(_), Input::Enter) => Ok(Step::Done),
+            (Some(_), Input::Text(t) | Input::Keyword(t))
+                if !self.first && (t.trim().eq_ignore_ascii_case("first") || t.trim().eq_ignore_ascii_case("f")) =>
+            {
+                self.first = true;
+                Ok(Step::Continue)
+            }
+            (Some(h), Input::Text(t) | Input::Keyword(t)) if self.first => {
+                match super::super::machines::number(&t).filter(|v| v.is_finite() && *v > 0.0) {
+                    Some(v) => {
+                        let r = run_break(s, &json!({ "handle": h.hex(), "heights": [v], "enabled": true }))?;
+                        s.echo(format!("Table in {} part(s).", r["parts"]));
+                        self.first = false;
+                    }
+                    None => s.echo("Requires a positive number."),
+                }
+                Ok(Step::Continue)
+            }
             (Some(h), Input::Text(t) | Input::Keyword(t)) => {
                 let params = if t.trim().eq_ignore_ascii_case("off") || t.trim().eq_ignore_ascii_case("o") {
                     json!({ "handle": h.hex(), "enabled": false })

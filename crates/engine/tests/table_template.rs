@@ -225,7 +225,37 @@ fn a_template_breaks_a_long_table_into_sheets() {
     assert_eq!((b.height, b.spacing), (100.0, 25.0));
     // 15 + 30 × 8 = 255 high: three parts of at most 100, each with the header.
     assert_eq!(t.parts().len(), 3);
+    // A first sheet with less room: its part is shorter.
+    let mut first = gost();
+    first["breaks"] = json!({"height": 100, "heights": [60], "spacing": 25});
+    let r = s.execute("tabletemplate", &json!({ "template": first, "at": [0, 0], "rows": 30 })).unwrap();
+    let t = table(&s, r["handle"].as_str().unwrap());
+    let parts = t.parts();
+    assert_eq!(parts.first().map(|p| p.rows.len()), Some(6), "header and 5 rows in 60");
+    assert_eq!(parts.get(1).map(|p| p.rows.len()), Some(11), "header and 10 rows in 100");
     let mut bad = gost();
     bad["breaks"] = json!({"spacing": 5});
     assert!(s.execute("tabletemplate", &json!({ "template": bad, "at": [0, 0] })).is_err());
+}
+
+#[test]
+fn typed_tablebreak_sets_the_part_heights() {
+    let mut s = Session::new();
+    let r = s.execute("tabletemplate", &json!({ "template": gost(), "at": [0, 0], "rows": 30 })).unwrap();
+    let h = r["handle"].as_str().unwrap().to_string();
+    s.set_selection(vec![Handle::parse_hex(&h).unwrap()]);
+    s.cmdline("tbr").unwrap();
+    assert!(s.current_prompt().is_some_and(|p| p.keywords == ["Off", "First"]));
+    s.cmdline("first").unwrap();
+    s.cmdline("60").unwrap();
+    s.cmdline("100").unwrap();
+    assert!(!s.prompting());
+    let b = table(&s, &h).breaks.unwrap();
+    assert_eq!((b.height, b.heights.clone(), b.enabled), (100.0, vec![60.0], true));
+    // Off.
+    s.set_selection(vec![Handle::parse_hex(&h).unwrap()]);
+    s.cmdline("tbr").unwrap();
+    assert_eq!(s.current_prompt().and_then(|p| p.default).as_deref(), Some("100"));
+    s.cmdline("off").unwrap();
+    assert!(table(&s, &h).breaks.is_none_or(|b| !b.enabled));
 }

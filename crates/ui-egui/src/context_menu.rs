@@ -160,6 +160,7 @@ fn object_commands(app: &CadApp) -> Vec<(&'static str, Option<&'static str>)> {
                 v.push(("reportupdate", Some("Update Report")));
             }
             v.push(("tabletemplate", Some("Apply Table Template...")));
+            v.push(("tablebreak", None));
             v
         }
         _ => Vec::new(),

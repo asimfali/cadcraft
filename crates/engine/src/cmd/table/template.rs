@@ -50,7 +50,7 @@ const PARAMS: &str = "{file?: table template (.json), template?: {…} (the temp
      lines?: {outline, header, vertical, horizontal} (mm), title?: text | {text?, height?, textHeight?}, \
      header?: {rows?: [[text | \"<\" | \"^\"]], heights?, height?, textHeight?}, \
      columns: [{header?, width, align?: TL…BR, rotation?, margin?, textHeight?, headerAlign?, headerRotation?}], \
-     breaks?: {height (tallest part), spacing?, direction?: right|left|down, repeatTop?}}";
+     breaks?: {height (tallest part), heights?: [first parts], spacing?, direction?: right|left|down, repeatTop?}}";
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -272,7 +272,18 @@ pub fn parse(v: &Value) -> Res<Template> {
                 repeat_top: b.get("repeatTop").and_then(Value::as_bool).unwrap_or(true),
                 repeat_bottom: false,
                 height: size(b, "height")?.ok_or("`breaks` needs `height`: the tallest part (a sheet's room for the table)")?,
-                heights: Vec::new(),
+                // The first parts' own heights (a first sheet with a taller title block).
+                heights: match b.get("heights") {
+                    None | Some(Value::Null) => Vec::new(),
+                    Some(Value::Array(a)) => a
+                        .iter()
+                        .take(cadcraft_doc::MAX_TABLE_PARTS)
+                        .map(|x| {
+                            x.as_f64().filter(|v| v.is_finite() && *v > 0.0 && *v <= MAX_SIZE).ok_or("`breaks.heights` must be numbers more than 0")
+                        })
+                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                    Some(_) => return Err("`breaks.heights` must be a list of heights".into()),
+                },
                 spacing: margin(b, "spacing")?.unwrap_or(10.0),
                 offsets: Vec::new(),
             })

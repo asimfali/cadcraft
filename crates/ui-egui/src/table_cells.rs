@@ -397,6 +397,7 @@ pub fn entries(app: &CadApp) -> Option<Vec<Vec<Entry>>> {
         table_items.push(item("Update Report", format!("{CELL}report")));
     }
     table_items.push(item("Apply Table Template...", format!("{CELL}template")));
+    table_items.push(item("Table Breaks...", format!("{CELL}break")));
     groups.push(table_items);
     Some(groups)
 }
@@ -485,11 +486,11 @@ pub fn act(app: &mut CadApp, action: &str) {
                 app.session.echo(m.to_string());
             }
         }),
-        // TABLETEMPLATE on the table: it asks for the template file.
-        ["template"] => {
+        // TABLETEMPLATE / TABLEBREAK on the table: they ask for the file, the part height.
+        ["template"] | ["break"] => {
             app.canvas.cells = None;
             app.session.set_selection(vec![sel.table]);
-            app.start("tabletemplate");
+            app.start(if action == "break" { "tablebreak" } else { "tabletemplate" });
             Ok(Value::Null)
         }
         ["merge"] => app.run("table.merge", json!({ "handle": h, "row": r0, "col": c0, "rows": rows, "cols": cols })),

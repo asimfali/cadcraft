@@ -49,6 +49,11 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// A height as a prompt default: no trailing zeros.
+pub(super) fn fmt_height(v: f64) -> String {
+    eval::fmt_num(v, None)
+}
+
 /// The directory relative file names are read from: the report file's, else the drawing's.
 pub(super) fn base_dir(s: &Session, file: Option<&str>) -> Option<PathBuf> {
     let from_file = file.and_then(|f| Path::new(f).parent()).filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf);
