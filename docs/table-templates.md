@@ -52,6 +52,7 @@ JSON form: `{"file": "gost.json", "at": [0, 0], "rows": 10}` or `{"file": "gost.
 | `title` | A title row: a text, or `{text, height, textHeight}`. Without text a table keeps its own title. |
 | `header` | `{height, textHeight}` for one header row of the columns' `header` texts, or `{rows, heights, textHeight}` for several rows: in `rows`, `<` joins a cell to the one on its left and `^` to the one above. `false`: no header. |
 | `columns` | `{header, width, align, rotation, margin, textHeight, headerAlign, headerRotation}`; alignments `TL` … `BR`, rotations 0, 90, 180, 270. |
+| `breaks` | A long table in parts, one per sheet: `{height, spacing, direction, repeatTop}` — the tallest part (header included), the space between parts (default 10), `right` (default), `left` or `down`, and whether each part repeats the header (default yes). |
 
 A header of two rows:
 

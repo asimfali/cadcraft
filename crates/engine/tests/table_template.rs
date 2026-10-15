@@ -212,3 +212,20 @@ fn bare_file_names_are_found_and_wrong_kinds_explained() {
 fn last_table(s: &Session) -> String {
     s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle).max().unwrap().hex()
 }
+
+#[test]
+fn a_template_breaks_a_long_table_into_sheets() {
+    let mut s = Session::new();
+    let mut tpl = gost();
+    tpl["breaks"] = json!({"height": 100, "spacing": 25});
+    let r = s.execute("tabletemplate", &json!({ "template": tpl, "at": [0, 0], "rows": 30 })).unwrap();
+    let t = table(&s, r["handle"].as_str().unwrap());
+    let b = t.breaks.clone().expect("broken");
+    assert!(b.enabled && b.repeat_top);
+    assert_eq!((b.height, b.spacing), (100.0, 25.0));
+    // 15 + 30 × 8 = 255 high: three parts of at most 100, each with the header.
+    assert_eq!(t.parts().len(), 3);
+    let mut bad = gost();
+    bad["breaks"] = json!({"spacing": 5});
+    assert!(s.execute("tabletemplate", &json!({ "template": bad, "at": [0, 0] })).is_err());
+}

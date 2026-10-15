@@ -49,7 +49,8 @@ const PARAMS: &str = "{file?: table template (.json), template?: {…} (the temp
      Template: {name, textStyle?: name | {name, font}, textHeight, margin?, marginV?, rowHeight?, rowGrow?: free|fixed|step, \
      lines?: {outline, header, vertical, horizontal} (mm), title?: text | {text?, height?, textHeight?}, \
      header?: {rows?: [[text | \"<\" | \"^\"]], heights?, height?, textHeight?}, \
-     columns: [{header?, width, align?: TL…BR, rotation?, margin?, textHeight?, headerAlign?, headerRotation?}]}";
+     columns: [{header?, width, align?: TL…BR, rotation?, margin?, textHeight?, headerAlign?, headerRotation?}], \
+     breaks?: {height (tallest part), spacing?, direction?: right|left|down, repeatTop?}}";
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -102,6 +103,8 @@ pub struct Template {
     pub header_heights: Vec<f64>,
     pub header_text_height: Option<f64>,
     pub columns: Vec<Column>,
+    /// Parts the table is broken into (one per sheet): `None` keeps the table's own.
+    pub breaks: Option<cadcraft_doc::TableBreak>,
 }
 
 type Res<T> = std::result::Result<T, String>;
@@ -254,6 +257,28 @@ pub fn parse(v: &Value) -> Res<Template> {
     } else if header.is_empty() && columns.iter().any(|c| !c.header.is_empty()) {
         header.push(columns.iter().map(|c| c.header.clone()).collect());
     }
+    let breaks = match o.get("breaks") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(b)) => {
+            let direction = match b.get("direction").and_then(Value::as_str).map(str::to_ascii_lowercase).as_deref() {
+                None | Some("right") => cadcraft_doc::BreakDirection::Right,
+                Some("left") => cadcraft_doc::BreakDirection::Left,
+                Some("down") => cadcraft_doc::BreakDirection::Down,
+                Some(other) => return Err(format!("`breaks.direction` must be right, left or down, not {other}")),
+            };
+            Some(cadcraft_doc::TableBreak {
+                enabled: true,
+                direction,
+                repeat_top: b.get("repeatTop").and_then(Value::as_bool).unwrap_or(true),
+                repeat_bottom: false,
+                height: size(b, "height")?.ok_or("`breaks` needs `height`: the tallest part (a sheet's room for the table)")?,
+                heights: Vec::new(),
+                spacing: margin(b, "spacing")?.unwrap_or(10.0),
+                offsets: Vec::new(),
+            })
+        }
+        Some(_) => return Err("`breaks` must be {height, spacing?, direction?, repeatTop?}".into()),
+    };
     let text_height = size(o, "textHeight")?.unwrap_or(2.5);
     let margin_h = margin(o, "margin")?.unwrap_or(text_height * 0.3);
     Ok(Template {
@@ -275,6 +300,7 @@ pub fn parse(v: &Value) -> Res<Template> {
         header_heights,
         header_text_height,
         columns,
+        breaks,
     })
 }
 
@@ -479,6 +505,9 @@ pub fn apply(t: &mut Table, tpl: &Template, link: Option<TableTemplateLink>) {
     t.text_height = tpl.text_height;
     if let Some(g) = tpl.row_grow {
         t.row_grow = g;
+    }
+    if let Some(b) = &tpl.breaks {
+        t.breaks = Some(b.clone());
     }
     set_anchors(t, &merges);
     data_looks(t, tpl, head);

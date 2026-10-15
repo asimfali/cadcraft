@@ -25,7 +25,7 @@ use cadcraft_doc::foreign::ForeignObject;
 use cadcraft_doc::{Drawing, Entity, EntityKind, Handle};
 use serde_json::Value;
 
-use super::def::{Field, Report, Section};
+use super::def::{Field, Report, RowCell, Section};
 use crate::cmd::qselect::{properties, wildcard};
 
 /// Most records a report reads (objects times their `each` items).
@@ -43,8 +43,15 @@ pub type Lookups = BTreeMap<String, Vec<BTreeMap<String, String>>>;
 pub enum Row {
     /// A section's title, across the table.
     Title(String),
-    /// A cell text per column.
-    Data(Vec<String>),
+    /// A cell per column.
+    Data(Vec<Out>),
+}
+
+/// A cell the report fills: its text, or a wire sketch (then the text sums it up).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Out {
+    pub text: String,
+    pub sketch: Option<super::sketch::Sketch>,
 }
 
 /// One record: an object and, with `each`, one of its items (text, 1-based index).
@@ -109,11 +116,16 @@ impl Ctx<'_> {
                 Field::Template(t) => self.record_text(r, t, depth + 1),
                 Field::Lookup { table, matches, get, default } => {
                     let wanted: Vec<(&String, String)> = matches.iter().map(|(col, t)| (col, self.record_text(r, t, depth + 1))).collect();
-                    self.lookups
+                    let hit = self
+                        .lookups
                         .get(table)
                         .and_then(|rows| rows.iter().find(|row| wanted.iter().all(|(col, v)| row.get(*col).is_some_and(|x| same(x, v)))))
-                        .and_then(|row| row.get(get).cloned())
-                        .unwrap_or_else(|| default.clone())
+                        .and_then(|row| row.get(get).cloned());
+                    // No row: the default, a template too (`{layer}`).
+                    match hit {
+                        Some(v) => v,
+                        None => self.record_text(r, default, depth + 1),
+                    }
                 }
             }
         } else {
@@ -525,7 +537,21 @@ pub fn run(d: &Drawing, r: &Report, objs: &[&Entity], lookups: &Lookups) -> Resu
         }
         for (_, g) in &groups {
             number += 1;
-            rows.push(Row::Data(s.row.iter().map(|t| ctx.group_text(&mut recs, g, t, number)).collect()));
+            let mut cells = Vec::new();
+            for rc in &s.row {
+                cells.push(match rc {
+                    RowCell::Text(t) => Out { text: ctx.group_text(&mut recs, g, t, number), sketch: None },
+                    RowCell::Sketch(sd) => {
+                        let split = |v: String| -> Vec<String> { v.split(';').map(|x| x.trim().to_string()).collect() };
+                        let ends = split(ctx.group_text(&mut recs, g, &sd.ends, number));
+                        let lengths: Vec<String> =
+                            split(ctx.group_text(&mut recs, g, &sd.lengths, number)).into_iter().filter(|x| !x.is_empty()).collect();
+                        let sk = super::sketch::Sketch { nodes: ends, lengths, unit: sd.unit.clone(), width: sd.width, words: sd.words.clone() };
+                        Out { text: sk.summary(), sketch: Some(sk) }
+                    }
+                });
+            }
+            rows.push(Row::Data(cells));
         }
     }
     Ok(rows)

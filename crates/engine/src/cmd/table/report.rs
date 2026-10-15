@@ -10,6 +10,7 @@
 
 mod def;
 mod eval;
+mod sketch;
 
 use std::path::{Path, PathBuf};
 
@@ -224,6 +225,28 @@ fn rows(s: &Session, id: &str, l: &Loaded, handles: &[Handle]) -> Result<Vec<Row
     Ok(rows)
 }
 
+/// Make the blocks of the rows' wire sketches, their text in `style`.
+fn make_sketches(s: &mut Session, rows: &[Row], style: &str) -> Result<()> {
+    let d = s.doc_mut()?;
+    for r in rows {
+        if let Row::Data(v) = r {
+            for sk in v.iter().filter_map(|o| o.sketch.as_ref()) {
+                sketch::ensure_block(d, sk, style);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The text style a report's sketches use: its template's, else Standard.
+fn sketch_style(s: &Session, l: &Loaded) -> String {
+    l.template
+        .as_ref()
+        .and_then(|tl| tl.template.text_style.as_ref())
+        .and_then(|(n, _)| s.doc().ok()?.text_style(n).map(|st| st.name.clone()))
+        .unwrap_or_else(|| "Standard".into())
+}
+
 /// Put `rows` into `t` from row `start` on, in `cols` columns. The new rows look like the
 /// first data row was (its height and its cells' formats); merges below `start` go.
 fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f64>) {
@@ -239,10 +262,21 @@ fn fill(t: &mut Table, start: usize, cols: usize, rows: &[Row], row_h: Option<f6
     t.row_min.truncate(start);
     t.row_styles.truncate(start);
     let cell = |c: usize, text: String| TableCell { text, merged: None, formula: None, block: None, ..model.get(c).cloned().unwrap_or_default() };
+    // A sketch: its block (made by `make_sketches`), every one of a column at one scale: its
+    // width across the cell, so the texts of all rows are alike.
+    let widths = t.col_widths.clone();
+    let out = |c: usize, o: Option<&eval::Out>| match o {
+        Some(eval::Out { sketch: Some(sk), .. }) => {
+            let scale = widths.get(c).map(|w| w * 0.94 / sk.width.max(1.0)).filter(|k| k.is_finite() && *k > 0.0);
+            TableCell { block: Some(cadcraft_doc::CellBlock { name: sk.block_name(), scale, ..Default::default() }), ..cell(c, String::new()) }
+        }
+        Some(o) => cell(c, o.text.clone()),
+        None => cell(c, String::new()),
+    };
     for row in rows {
         let r = t.cells.len();
         match row {
-            Row::Data(v) => t.cells.push((0..cols).map(|c| cell(c, v.get(c).cloned().unwrap_or_default())).collect()),
+            Row::Data(v) => t.cells.push((0..cols).map(|c| out(c, v.get(c))).collect()),
             Row::Title(text) => {
                 t.cells.push((0..cols).map(|c| cell(c, if c == 0 { text.clone() } else { String::new() })).collect());
                 if cols > 1 {
@@ -301,12 +335,24 @@ fn new_table(s: &Session, l: &Loaded, rows: &[Row], at: Vec2, title: Option<&str
     let mut t = make_table(&st, at, 0, cols, r.row_height, None, title, header, &[]);
     let start = usize::from(t.title) + usize::from(t.header);
     let data_h = r.row_height.unwrap_or(st.text_height * 5.0 / 3.0 + 2.0 * st.margin);
+    // Widths known before the data (sketches are scaled to them): as given, else a sketch's own.
+    let sketch_w = |c: usize| {
+        rows.iter().find_map(|row| match row {
+            Row::Data(v) => v.get(c).and_then(|o| o.sketch.as_ref()).map(|sk| sk.width),
+            Row::Title(_) => None,
+        })
+    };
+    let fixed: Vec<Option<f64>> = (0..t.col_widths.len()).map(|c| r.columns.get(c).and_then(|x| x.width).or_else(|| sketch_w(c))).collect();
+    for (w, f) in t.col_widths.iter_mut().zip(&fixed) {
+        if let Some(f) = f {
+            *w = *f;
+        }
+    }
     // `make_table` gave a plain table an empty row: the data replaces it.
     fill(&mut t, start, cols, rows, Some(data_h));
-    // Columns as given, else as wide as their longest text.
+    // The other columns as wide as their longest text.
     for (c, w) in t.col_widths.iter_mut().enumerate() {
-        if let Some(given) = r.columns.get(c).and_then(|x| x.width) {
-            *w = given;
+        if fixed.get(c).copied().flatten().is_some() {
             continue;
         }
         let chars = t
@@ -339,7 +385,7 @@ fn link(l: &Loaded, start_row: usize, handles: &[Handle]) -> TableReport {
 fn rows_json(rows: &[Row]) -> Vec<Value> {
     rows.iter()
         .map(|r| match r {
-            Row::Data(v) => json!(v),
+            Row::Data(v) => json!(v.iter().map(|o| o.text.clone()).collect::<Vec<_>>()),
             Row::Title(t) => json!({ "title": t }),
         })
         .collect()
@@ -359,7 +405,7 @@ fn write_csv(id: &str, path: &str, columns: &[String], rows: &[Row]) -> Result<(
     }
     for r in rows {
         let cells = match r {
-            Row::Data(v) => v.clone(),
+            Row::Data(v) => v.iter().map(|o| o.text.clone()).collect(),
             Row::Title(t) => vec![t.clone()],
         };
         out.push_str(&line(&cells));
@@ -405,6 +451,8 @@ fn refill(s: &mut Session, id: &str, h: Handle, l: &Loaded, rows: &[Row], handle
     if let Some(tl) = &l.template {
         super::template::make_styles(s.doc_mut()?, &tl.template);
     }
+    let style = sketch_style(s, l);
+    make_sketches(s, rows, &style)?;
     edit(s, &json!({ "handle": h.hex() }), id, |t| {
         let start = super::head_rows(t);
         fill(t, start, cols, rows, None);
@@ -454,6 +502,8 @@ fn insert(s: &mut Session, l: &Loaded, rows: &[Row], at: Vec2, handles: &[Handle
     if let Some(tl) = &l.template {
         super::template::make_styles(s.doc_mut()?, &tl.template);
     }
+    let style = sketch_style(s, l);
+    make_sketches(s, rows, &style)?;
     let mut t = new_table(s, l, rows, at, title);
     let start = l.template.as_ref().map_or(usize::from(t.title) + usize::from(t.header), |tl| tl.template.head_rows());
     t.report = Some(link(l, start, handles));

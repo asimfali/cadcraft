@@ -81,7 +81,46 @@ A section:
 | `where` | `{field: pattern}`: every field must match its wildcard pattern; `!` before the pattern negates it; `""` matches an empty value, `?*` any value. |
 | `group` | Records with equal values of these fields make one row. Without `group`, each record is a row; `[]` makes one row of all of them (a total). |
 | `sort` | Fields or templates, `-` first for descending. Numbers sort by value, text in natural order (`X2` before `X10`). Default: by the group. |
-| `row` | A template per column. |
+| `row` | A template per column, or a wire sketch (below). |
+
+### Wire sketches
+
+A cell of `row` can be `{"sketch": {…}}`: a drawing of the wire, made as a block and shown in the
+cell (a wire list's Sketch column). Identical wires share one block (`SKETCH_…`).
+
+| Key | |
+|---|---|
+| `ends` | Template of the terminal codes at the nodes, `;`-separated: `"{xr.c1};{xr.c2}"`. Two nodes make a plain wire, more a chain whose inner terminals stand on the wire. |
+| `lengths` | Template of the section lengths, `;`-separated: `"{xr.L}"` (`40;35` makes two sections). |
+| `unit` | Written after each length (`" см"`). |
+| `width` | The sketch's width before it is scaled into the cell (default 120). |
+| `insulated`, `strip`, `mm` | Words of the notes (default `(insulated)`, `strip`, `mm`). |
+
+Codes: the first letter picks the terminal (`Н`/`H` blade, `В`/`B` fork, `К`/`K` ring, `НВН`
+blade with a second contact), a final `И` adds the insulated note, `Z12` (or `З12`) is a stripped
+end ("strip 12 mm"), anything else is shown as its label. The drawings are CADCraft's own. All
+sketches of a column are drawn at one scale, the sketch's width across the cell. Replies and CSV
+files get the sketch as text (`Н1И —60 см— В1`).
+
+A wire list:
+
+```json
+{
+  "template": "te4-template.json",
+  "lookups": {"colors": {"file": "colors.csv"}, "types": {"file": "wiretypes.csv"}},
+  "from": "lwpolyline",
+  "where": {"xr.L": "?*"},
+  "fields": {
+    "type": {"lookup": "types", "match": {"layer": "{layer}"}, "get": "text", "default": "{layer}"},
+    "colour": {"lookup": "colors", "match": {"ind": "{color}"}, "get": "val"}
+  },
+  "group": ["type", "colour", "xr.L", "xr.c1", "xr.c2"],
+  "sort": ["{min:xr.N}"],
+  "row": ["{#}", {"sketch": {"ends": "{xr.c1};{xr.c2}", "lengths": "{xr.L}", "unit": " cm"}}, "{type}", "{colour}", "{count}"]
+}
+```
+
+A lookup's `default` is a template too (`"{layer}"`: the layer's name when no row matches).
 
 ### Templates
 

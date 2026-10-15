@@ -90,8 +90,42 @@ pub struct Section {
     pub group: Option<Vec<String>>,
     /// Row order: field names or templates, `-` first for descending; `None`: by the group.
     pub sort: Option<Vec<String>>,
-    /// A template per column.
-    pub row: Vec<String>,
+    /// What each column shows.
+    pub row: Vec<RowCell>,
+}
+
+/// What a column of a row shows: a template's text, or a wire sketch.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowCell {
+    Text(String),
+    Sketch(SketchDef),
+}
+
+/// A wire sketch ([`super::sketch`]): templates giving its nodes (terminal codes) and section
+/// lengths, both `;`-separated.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SketchDef {
+    pub ends: String,
+    pub lengths: String,
+    pub unit: String,
+    pub width: f64,
+    /// Words of its notes: insulated, strip, mm.
+    pub words: (String, String, String),
+}
+
+fn row_cell(v: &Value) -> Res<RowCell> {
+    if let Some(t) = text(v) {
+        return Ok(RowCell::Text(t));
+    }
+    let sk = v.get("sketch").and_then(Value::as_object).ok_or("a row cell must be a template or {sketch: {ends, lengths}}")?;
+    let word = |k: &str, d: &str| -> Res<String> { Ok(opt_text(sk, k)?.unwrap_or_else(|| d.to_string())) };
+    Ok(RowCell::Sketch(SketchDef {
+        ends: opt_text(sk, "ends")?.ok_or("a sketch needs `ends`: its terminal codes (`{xr.c1};{xr.c2}`)")?,
+        lengths: opt_text(sk, "lengths")?.unwrap_or_default(),
+        unit: word("unit", "")?,
+        width: positive(sk, "width")?.unwrap_or(120.0),
+        words: (word("insulated", "(insulated)")?, word("strip", "strip")?, word("mm", "mm")?),
+    }))
 }
 
 /// A report definition.
@@ -244,7 +278,9 @@ fn section(v: &Value) -> Res<Section> {
         }
     }
     let row = match o.get("row") {
-        Some(v) => texts(v, "row", MAX_COLUMNS)?,
+        Some(Value::Array(a)) if a.len() > MAX_COLUMNS => return Err(format!("`row` has more than {MAX_COLUMNS} entries")),
+        Some(Value::Array(a)) => a.iter().map(row_cell).collect::<Res<Vec<_>>>()?,
+        Some(v) => vec![row_cell(v)?],
         None => return Err("a section needs `row`: a template per column".into()),
     };
     Ok(Section {

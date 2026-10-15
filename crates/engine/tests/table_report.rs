@@ -321,3 +321,35 @@ fn bad_reports_are_errors() {
 fn last_table(s: &Session) -> String {
     s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle).max().unwrap().hex()
 }
+
+#[test]
+fn a_wire_list_with_sketches() {
+    let mut s = drawing();
+    let def = json!({
+        "columns": [{"header": "No.", "width": 15}, {"header": "Sketch", "width": 100}, {"header": "Qty", "width": 15}],
+        "from": "lwpolyline",
+        "where": {"xr.L": "?*"},
+        "group": ["layer", "color", "xr.L", "xr.c1", "xr.c2"],
+        "sort": ["{min:xr.N}"],
+        "row": ["{#}", {"sketch": {"ends": "{xr.c1};{xr.c2}", "lengths": "{xr.L}", "unit": " см", "insulated": "(изолир)"}}, "{count}"]
+    });
+    let r = s.execute("report", &json!({ "definition": def, "at": [0, -100] })).unwrap();
+    // Replies and files get the sketch as text; identical wires make one row.
+    let rows = r["rows"].as_array().unwrap().clone();
+    assert!(rows.contains(&json!(["3", "Н1 —120 см— Н1И", "3"])), "{rows:?}");
+    // Two sections, two nodes given: the last end is bare.
+    assert!(rows.iter().any(|r| r[1] == "К1 —80 см— Z12 —40 см—"), "{rows:?}");
+    let t = table(&s, r["table"].as_str().unwrap());
+    let i = rows.iter().position(|r| r[2] == "3").unwrap();
+    let cell = &t.cells[1 + i][1];
+    let b = cell.block.as_ref().expect("a sketch block");
+    assert!(cell.text.is_empty());
+    assert!(b.scale.is_some_and(|k| (k - 100.0 * 0.94 / 120.0).abs() < 1e-9), "{:?}", b.scale);
+    let d = s.doc().unwrap();
+    let def_block = d.block(&b.name).expect("the sketch's block is made");
+    assert!(def_block.entities.iter().any(|e| matches!(&e.kind, EntityKind::Text(x) if x.value == "(изолир)")));
+    // The same wires again: the same block, not a new one.
+    let blocks = d.blocks.len();
+    s.execute("reportupdate", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().blocks.len(), blocks);
+}
