@@ -25,6 +25,13 @@ const SNAP: f64 = 0.25;
 /// Size of a stacked fraction's text against the line's.
 const STACK_SCALE: f32 = 0.7;
 
+/// The room a stacked fraction takes in the text box: its wider part and a little space.
+fn stack_width(fs: &mut egui::epaint::FontsView<'_>, top: &str, bottom: &str, small: &FontId, size: f32) -> f32 {
+    let wt = fs.layout_no_wrap(top.to_string(), small.clone(), Color32::WHITE).size().x;
+    let wb = fs.layout_no_wrap(bottom.to_string(), small.clone(), Color32::WHITE).size().x;
+    wt.max(wb) + size * 0.3
+}
+
 #[derive(Clone)]
 struct State {
     fmt: Formatted,
@@ -115,6 +122,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             let y0 = ui.cursor().top();
             toolbar(ui, &mut st, base_h);
             ruler(ui, &mut st, px, width, base_h);
+            fraction_row(ui, &mut st);
             st.top = ui.cursor().top() - y0;
             text_box(ui, &mut st, base_h, px, width, &t);
             ui.horizontal(|ui| {
@@ -350,6 +358,49 @@ fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
     }
 }
 
+/// The stacked fraction the caret is at (just before or after it) or the selection is.
+fn fraction_at(st: &State) -> Option<usize> {
+    let chars: Vec<char> = st.fmt.text().chars().collect();
+    let is = |i: usize| chars.get(i).is_some_and(|c| st.fmt.stack_of(*c).is_some());
+    let (a, b) = (st.sel.0.min(st.sel.1), st.sel.0.max(st.sel.1));
+    if b == a + 1 && is(a) {
+        return Some(a);
+    }
+    if a != b {
+        return None;
+    }
+    a.checked_sub(1).filter(|i| is(*i)).or_else(|| is(a).then_some(a))
+}
+
+/// With the caret at a stacked fraction: its upper and lower text and its separator, to edit
+/// apart (AutoCAD's Stack Properties).
+fn fraction_row(ui: &mut egui::Ui, st: &mut State) {
+    let Some(i) = fraction_at(st) else { return };
+    let Some((mut top, mut sep, mut bottom)) = st.fmt.text().chars().nth(i).and_then(|c| st.fmt.stack_of(c)) else { return };
+    let w = ((ui.available_width() - 170.0) / 2.0).max(80.0);
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.label(crate::tl!("Fraction:"));
+        changed |= ui
+            .add(egui::TextEdit::singleline(&mut top).id_salt("mtext_stack_top").desired_width(w))
+            .on_hover_text(crate::tl!("Upper text"))
+            .changed();
+        egui::ComboBox::from_id_salt("mtext_stack_sep").width(36.0).selected_text(sep.to_string()).show_ui(ui, |ui| {
+            for (c, tip) in [('/', crate::tl!("Horizontal bar")), ('#', crate::tl!("Diagonal bar")), ('^', crate::tl!("No bar (tolerance)"))] {
+                changed |= ui.selectable_value(&mut sep, c, format!("{c}  {tip}")).changed();
+            }
+        });
+        changed |= ui
+            .add(egui::TextEdit::singleline(&mut bottom).id_salt("mtext_stack_bottom").desired_width(w))
+            .on_hover_text(crate::tl!("Lower text"))
+            .changed();
+    });
+    if changed {
+        st.fmt.set_stack(i, &top, sep, &bottom);
+    }
+}
+
 /// Insert `s` at the caret (over the selection).
 fn insert(st: &mut State, s: &str) {
     let (a, b) = (st.sel.0.min(st.sel.1), st.sel.0.max(st.sel.1));
@@ -477,21 +528,12 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
                 cur = None;
                 let size = f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
                 let small = FontId::proportional(size * STACK_SCALE);
-                let width = ui.fonts_mut(|fs| {
-                    let wt = fs.layout_no_wrap(top.clone(), small.clone(), Color32::WHITE).size().x;
-                    let wb = fs.layout_no_wrap(bottom.clone(), small.clone(), Color32::WHITE).size().x;
-                    let own = fs.layout_no_wrap(c.to_string(), FontId::proportional(size), Color32::WHITE).size().x;
-                    (wt.max(wb) + size * 0.3 - own).max(0.0)
-                });
+                let width = ui.fonts_mut(|fs| stack_width(fs, &top, &bottom, &small, size));
+                // The room goes before the (invisible) placeholder: the fraction ends where it starts.
                 job.append(
                     &c.to_string(),
-                    0.0,
-                    TextFormat {
-                        font_id: FontId::proportional(size),
-                        color: Color32::TRANSPARENT,
-                        extra_letter_spacing: width,
-                        ..TextFormat::default()
-                    },
+                    width,
+                    TextFormat { font_id: FontId::proportional(size), color: Color32::TRANSPARENT, ..TextFormat::default() },
                 );
                 continue;
             }
@@ -524,15 +566,21 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
     let painter = ui.painter_at(out.response.rect);
     for (i, c) in buf.chars().enumerate() {
         let Some((top, sep, bottom)) = stack_fmt.stack_of(c) else { continue };
-        let a = out.galley.pos_from_cursor(CCursor::new(i)).translate(out.galley_pos.to_vec2());
-        let b = out.galley.pos_from_cursor(CCursor::new(i + 1)).translate(out.galley_pos.to_vec2());
         let f = stack_fmt.fmt_at(i);
         let size = f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
         let color = f.color.map_or(default_color, color32);
-        let (x0, x1) = (a.min.x, if (b.min.y - a.min.y).abs() < 1.0 { b.min.x } else { a.min.x + size });
+        let small = FontId::proportional(size * STACK_SCALE);
+        let (w, own) = ui.fonts_mut(|fs| {
+            (stack_width(fs, &top, &bottom, &small, size), fs.layout_no_wrap(c.to_string(), FontId::proportional(size), Color32::WHITE).size().x)
+        });
+        // The fraction is the room laid out just before the placeholder glyph, which ends where
+        // the next character starts.
+        let a = out.galley.pos_from_cursor(CCursor::new(i)).translate(out.galley_pos.to_vec2());
+        let b = out.galley.pos_from_cursor(CCursor::new(i + 1)).translate(out.galley_pos.to_vec2());
+        let end = if (b.min.y - a.min.y).abs() < 1.0 { b.min.x - own } else { a.min.x + w };
+        let (x0, x1) = (end - w, end);
         let mid = (a.min.y + a.max.y) / 2.0;
         let cx = (x0 + x1) / 2.0;
-        let small = FontId::proportional(size * STACK_SCALE);
         painter.text(pos2(cx, mid - 1.0), Align2::CENTER_BOTTOM, &top, small.clone(), color);
         painter.text(pos2(cx, mid + 1.0), Align2::CENTER_TOP, &bottom, small, color);
         if sep != '^' {
@@ -568,6 +616,17 @@ mod tests {
     use cadcraft_engine::Session;
 
     use crate::Services;
+
+    #[test]
+    fn the_fraction_row_follows_the_caret() {
+        let fmt = Formatted::from_contents("Круг \\SВ20/45; кг");
+        let mut st = State { fmt, typing: CharFmt::default(), typing_at: 0, top: 0.0, sel: (0, 0), caret: None, at: (0.0, 0.0), focus: false };
+        assert_eq!(fraction_at(&st), None);
+        for (sel, want) in [((5, 5), Some(5)), ((6, 6), Some(5)), ((5, 6), Some(5)), ((7, 7), None), ((4, 7), None)] {
+            st.sel = sel;
+            assert_eq!(fraction_at(&st), want, "{sel:?}");
+        }
+    }
 
     #[test]
     fn editor_opens_only_for_mtext_text_entry_and_finishes_with_formatted_contents() {

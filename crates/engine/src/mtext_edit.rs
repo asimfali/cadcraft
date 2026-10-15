@@ -96,6 +96,19 @@ fn arg_end(chars: &[char], from: usize) -> usize {
     j
 }
 
+/// Text for one part of a stacked fraction: its separators, `;` and backslashes escaped, line
+/// breaks dropped.
+fn stack_escape(t: &str) -> String {
+    let mut out = String::new();
+    for c in t.chars().filter(|c| *c != '\n' && *c != '\r').take(1000) {
+        if matches!(c, '/' | '#' | '^' | ';' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// The parts of a stacked fraction code `\\Supper/lower;` (also `#` and `^`): (upper,
 /// separator, lower), with `\\/`-style escapes undone.
 pub fn stack_parts(code: &str) -> Option<(String, char, String)> {
@@ -258,6 +271,18 @@ impl Formatted {
         let fmt = self.fmt_at(r.start);
         self.text = chars.iter().take(r.start).chain(std::iter::once(&ch)).chain(chars.iter().skip(r.end)).collect();
         self.fmt.splice(r, [fmt]);
+        true
+    }
+
+    /// Change the stacked fraction at character `i`: its upper and lower text and separator
+    /// (`/`, `#` or `^`). Returns whether there was one.
+    pub fn set_stack(&mut self, i: usize, top: &str, sep: char, bottom: &str) -> bool {
+        let Some(c) = self.text.chars().nth(i) else { return false };
+        if self.stack_of(c).is_none() || !matches!(sep, '/' | '#' | '^') {
+            return false;
+        }
+        let Some(code) = (c as u32).checked_sub(ATOM_BASE).and_then(|k| self.atoms.get_mut(k as usize)) else { return false };
+        *code = format!("\\S{}{sep}{};", stack_escape(top), stack_escape(bottom));
         true
     }
 
@@ -582,6 +607,13 @@ mod tests {
         assert!(!g.stack(0..6));
         assert!(!g.unstack(0));
         assert_eq!(stack_parts("\\S+0,1^-0,2;"), Some(("+0,1".into(), '^', "-0,2".into())));
+        // The parts edited apart; separators in them are escaped and read back.
+        let mut h = Formatted::from_contents("\\S1/2;");
+        assert!(h.set_stack(0, "B20 a/b", '#', "45;x"));
+        assert_eq!(h.to_contents(), "\\SB20 a\\/b#45\\;x;");
+        let c = h.text().chars().next().unwrap_or(' ');
+        assert_eq!(h.stack_of(c), Some(("B20 a/b".into(), '#', "45;x".into())));
+        assert!(!h.set_stack(0, "a", '*', "b"));
         assert_eq!(stack_parts("\\Lx;"), None);
     }
 

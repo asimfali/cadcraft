@@ -1079,3 +1079,9 @@
 # The in-place text editor on a table cell.
 	Stack	Стопка (дробь)
 	Enter or Tab: next cell, Alt+Enter: new line, Esc: done	Enter или Tab — следующая ячейка, Alt+Enter — новая строка, Esc — готово
+	Fraction:	Дробь:
+	Upper text	Верхний текст
+	Lower text	Нижний текст
+	Horizontal bar	Горизонтальная черта
+	Diagonal bar	Косая черта
+	No bar (tolerance)	Без черты (допуск)

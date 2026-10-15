@@ -1401,3 +1401,9 @@
 # The in-place text editor on a table cell.
 	Stack	Стос (дріб)
 	Enter or Tab: next cell, Alt+Enter: new line, Esc: done	Enter або Tab — наступна комірка, Alt+Enter — новий рядок, Esc — готово
+	Fraction:	Дріб:
+	Upper text	Верхній текст
+	Lower text	Нижній текст
+	Horizontal bar	Горизонтальна риска
+	Diagonal bar	Коса риска
+	No bar (tolerance)	Без риски (допуск)
