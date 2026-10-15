@@ -1076,3 +1076,6 @@
 	Table template	Шаблон таблицы
 	No files in the usual folders: browse for one.	В обычных папках файлов нет: выберите через «Обзор...».
 	Select objects to report on	Выберите объекты для отчёта
+# The in-place text editor on a table cell.
+	Stack	Стопка (дробь)
+	Enter or Tab: next cell, Alt+Enter: new line, Esc: done	Enter или Tab — следующая ячейка, Alt+Enter — новая строка, Esc — готово

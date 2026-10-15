@@ -96,6 +96,29 @@ fn arg_end(chars: &[char], from: usize) -> usize {
     j
 }
 
+/// The parts of a stacked fraction code `\\Supper/lower;` (also `#` and `^`): (upper,
+/// separator, lower), with `\\/`-style escapes undone.
+pub fn stack_parts(code: &str) -> Option<(String, char, String)> {
+    let inner = code.strip_prefix("\\S")?.strip_suffix(';')?;
+    let mut top = String::new();
+    let mut bottom = String::new();
+    let mut sep = None;
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        let target = if sep.is_some() { &mut bottom } else { &mut top };
+        match c {
+            '\\' => {
+                if let Some(n) = chars.next() {
+                    target.push(n);
+                }
+            }
+            '/' | '#' | '^' if sep.is_none() => sep = Some(c),
+            _ => target.push(c),
+        }
+    }
+    sep.map(|s| (top, s, bottom))
+}
+
 impl Formatted {
     /// Parse MTEXT contents. Never fails: what isn't understood is kept as atoms or dropped.
     pub fn from_contents(contents: &str) -> Formatted {
@@ -204,6 +227,53 @@ impl Formatted {
         let ch = char::from_u32(ATOM_BASE + self.atoms.len() as u32).unwrap_or('\u{FFFD}');
         self.atoms.push(code);
         self.push_char(ch, fmt);
+    }
+
+    /// The code an atom character stands for (`\\S1/2;`), or `None` for any other character.
+    pub fn atom_code(&self, c: char) -> Option<&str> {
+        let i = (c as u32).checked_sub(ATOM_BASE).filter(|i| (*i as usize) < MAX_ATOMS)?;
+        self.atoms.get(i as usize).map(String::as_str)
+    }
+
+    /// The stacked fraction an atom character stands for: (upper text, separator, lower text).
+    /// The separator is `/` (a horizontal bar), `#` (a diagonal bar) or `^` (no bar, tolerances).
+    pub fn stack_of(&self, c: char) -> Option<(String, char, String)> {
+        stack_parts(self.atom_code(c)?)
+    }
+
+    /// Make the characters of `range` one stacked fraction: their text must hold a `/`, `#` or
+    /// `^` (the first one splits it) and no line break, code or `;`. Returns whether it did.
+    pub fn stack(&mut self, range: std::ops::Range<usize>) -> bool {
+        let r = self.clamp(range);
+        let chars: Vec<char> = self.text.chars().collect();
+        let Some(sel) = chars.get(r.clone()) else { return false };
+        let sel: String = sel.iter().collect();
+        let Some(at) = sel.find(['/', '#', '^']) else { return false };
+        if sel.contains(['\n', ';', '\\']) || sel.chars().any(|c| self.atom_code(c).is_some()) || self.atoms.len() >= MAX_ATOMS {
+            return false;
+        }
+        let ch = char::from_u32(ATOM_BASE + self.atoms.len() as u32).unwrap_or('\u{FFFD}');
+        let (top, rest) = sel.split_at(at);
+        self.atoms.push(format!("\\S{top}{rest};"));
+        let fmt = self.fmt_at(r.start);
+        self.text = chars.iter().take(r.start).chain(std::iter::once(&ch)).chain(chars.iter().skip(r.end)).collect();
+        self.fmt.splice(r, [fmt]);
+        true
+    }
+
+    /// Turn the stacked fraction at character `i` back into its text (`1/2`). Returns whether
+    /// there was one.
+    pub fn unstack(&mut self, i: usize) -> bool {
+        let chars: Vec<char> = self.text.chars().collect();
+        let Some((top, sep, bottom)) = chars.get(i).and_then(|c| self.stack_of(*c)) else { return false };
+        let plain: Vec<char> = format!("{top}{sep}{bottom}").chars().collect();
+        if chars.len() + plain.len() > MAX_CHARS {
+            return false;
+        }
+        let fmt = self.fmt_at(i);
+        self.text = chars.iter().take(i).chain(plain.iter()).chain(chars.iter().skip(i + 1)).collect();
+        self.fmt.splice(i..i + 1, plain.iter().map(|_| fmt.clone()));
+        true
     }
 
     /// The text as the editor shows it.
@@ -494,6 +564,26 @@ fn apply_font(cur: &mut CharFmt, a: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stacked_fractions_are_shown_stacked_and_unstacked() {
+        let mut f = Formatted::from_contents("Круг \\SВ20 ГОСТ 2590-2006/45 ГОСТ 1050-2013;");
+        let c = f.text().chars().nth(5).unwrap_or(' ');
+        assert_eq!(f.stack_of(c), Some(("В20 ГОСТ 2590-2006".into(), '/', "45 ГОСТ 1050-2013".into())));
+        assert!(f.unstack(5));
+        assert_eq!(f.text(), "Круг В20 ГОСТ 2590-2006/45 ГОСТ 1050-2013");
+        assert_eq!(f.to_contents(), "Круг В20 ГОСТ 2590-2006/45 ГОСТ 1050-2013");
+        let n = f.len();
+        assert!(f.stack(5..n));
+        assert_eq!(f.to_contents(), "Круг \\SВ20 ГОСТ 2590-2006/45 ГОСТ 1050-2013;");
+        // Nothing to split, or a line break: no stack.
+        let mut g = Formatted::from_contents("ab\\Pc/d");
+        assert!(!g.stack(0..2));
+        assert!(!g.stack(0..6));
+        assert!(!g.unstack(0));
+        assert_eq!(stack_parts("\\S+0,1^-0,2;"), Some(("+0,1".into(), '^', "-0,2".into())));
+        assert_eq!(stack_parts("\\Lx;"), None);
+    }
 
     #[test]
     fn round_trips_formats_and_atoms() {

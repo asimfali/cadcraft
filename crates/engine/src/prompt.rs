@@ -220,8 +220,9 @@ pub trait Interactive: Send {
     fn drag(&self, _s: &Session, _cursor: Vec2) -> Option<Drag> {
         None
     }
-    /// The multiline text being typed (MTEXT, once its box is known) with empty contents: where
-    /// the UI places its in-place editor and with which height, width and justification.
+    /// The multiline text being typed (MTEXT once its box is known, with empty contents; a table
+    /// cell under TABLEDIT, with its contents): where the UI places its in-place editor, with
+    /// which height, width and justification, and what it starts with.
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         None
     }

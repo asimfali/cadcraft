@@ -433,6 +433,49 @@ fn run_tabledit(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 struct TableEditM {
     cell: Option<(Handle, usize, usize)>,
+    /// The cell as multiline text for the in-place editor: its place, width, text height and
+    /// style, and its contents (a formula as typed).
+    text: Option<cadcraft_doc::MText>,
+}
+
+impl TableEditM {
+    /// Edit cell `cell` next (`None`: pick one).
+    fn go(&mut self, s: &Session, cell: Option<(Handle, usize, usize)>) {
+        self.cell = cell;
+        self.text = cell.and_then(|(h, r, c)| cell_mtext(s, h, r, c));
+    }
+}
+
+/// Cell (`r`, `c`) of table `h` as multiline text: at its top left corner, inside its margins,
+/// with its text height and style and its contents.
+fn cell_mtext(s: &Session, h: Handle, r: usize, c: usize) -> Option<cadcraft_doc::MText> {
+    let d = s.doc().ok()?;
+    let EntityKind::Table(t) = &d.entity(h)?.kind else { return None };
+    let cell = t.cells.get(r)?.get(c)?;
+    let b = *t.cell_rects(r, c).first()?;
+    let st = cadcraft_render::table_style_of(d, t);
+    let name = t
+        .row_styles
+        .get(r)
+        .filter(|n| !n.is_empty())
+        .cloned()
+        .unwrap_or_else(|| cadcraft_doc::positional_cell_style(r, t.title, t.header).to_string());
+    let cs = st.cell_style(if cell.style.is_empty() { &name } else { &cell.style });
+    let k = if st.text_height > 0.0 { t.text_height / st.text_height } else { 1.0 };
+    let height = cell.text_height.unwrap_or(cs.text_height) * k;
+    let m = cs.margin_h * k;
+    Some(cadcraft_doc::MText {
+        insert: cadcraft_geom::Vec3::new(b.min.x + m, b.max.y - cs.margin_v * k, 0.0),
+        height: if height.is_finite() && height > 0.0 { height } else { 0.2 },
+        width: (b.width() - 2.0 * m).max(0.0),
+        attach: 1,
+        rotation: 0.0,
+        style: cs.text_style.clone(),
+        contents: cell.formula.clone().unwrap_or_else(|| cell.text.clone()),
+        line_spacing: 1.0,
+        line_spacing_exact: false,
+        columns: None,
+    })
 }
 
 /// The cell after (`r`, `c`) of table `h`, left to right then down, skipping cells a merge
@@ -459,6 +502,9 @@ impl Interactive for TableEditM {
     fn name(&self) -> &'static str {
         "TABLEDIT"
     }
+    fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
+        self.text.clone()
+    }
     fn prompt(&self, s: &Session) -> Prompt {
         match self.cell {
             None => Prompt::new("Pick a table cell", Accept::POINT),
@@ -482,14 +528,14 @@ impl Interactive for TableEditM {
             (None, Input::Cancel) | (None, Input::Enter) => Ok(Step::Cancel),
             (None, Input::Point(p)) => {
                 match cell_under(s, p) {
-                    Some(c) => self.cell = Some(c),
+                    Some(c) => self.go(s, Some(c)),
                     None => s.echo("No table cell there."),
                 }
                 Ok(Step::Continue)
             }
             (Some((h, r, c)), Input::Enter) => Ok(match next_cell(s, h, r, c) {
                 Some((nr, nc)) => {
-                    self.cell = Some((h, nr, nc));
+                    self.go(s, Some((h, nr, nc)));
                     Step::Continue
                 }
                 None => Step::Done,
@@ -502,7 +548,7 @@ impl Interactive for TableEditM {
                 }
                 Ok(match next_cell(s, h, r, c) {
                     Some((nr, nc)) => {
-                        self.cell = Some((h, nr, nc));
+                        self.go(s, Some((h, nr, nc)));
                         Step::Continue
                     }
                     None => Step::Done,
@@ -511,7 +557,7 @@ impl Interactive for TableEditM {
             // A point while typing picks another cell.
             (Some(_), Input::Point(p)) => {
                 match cell_under(s, p) {
-                    Some(c) => self.cell = Some(c),
+                    Some(c) => self.go(s, Some(c)),
                     None => s.echo("No table cell there."),
                 }
                 Ok(Step::Continue)

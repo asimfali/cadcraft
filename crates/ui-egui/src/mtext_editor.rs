@@ -22,6 +22,8 @@ const FAMILIES: [&str; 6] = ["Arial", "Times New Roman", "Courier New", "Verdana
 const SWATCHES: [u16; 7] = [1, 2, 3, 4, 5, 6, 7];
 /// Ruler snap, in text heights.
 const SNAP: f64 = 0.25;
+/// Size of a stacked fraction's text against the line's.
+const STACK_SCALE: f32 = 0.7;
 
 #[derive(Clone)]
 struct State {
@@ -36,6 +38,11 @@ struct State {
     sel: (usize, usize),
     /// A caret position to set on the text box in the next frame (after a toolbar insertion).
     caret: Option<usize>,
+    /// Where the edited text is (its insertion point): another one (TABLEDIT's next cell) starts
+    /// the editor afresh.
+    at: (f64, f64),
+    /// The text box takes the keyboard on the editor's first frame.
+    focus: bool,
 }
 
 fn state_id() -> egui::Id {
@@ -65,15 +72,22 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     };
     let t = Tokens::get();
     let (rect, scale) = app.canvas.xf.map_or((ctx.content_rect(), 20.0), |x| (x.rect, x.scale.max(1e-6)));
-    let mut st = ctx.data_mut(|d| d.get_temp::<State>(state_id())).unwrap_or_else(|| {
-        let mut fmt = Formatted::default();
+    // A table cell (TABLEDIT): Enter and Tab keep the text and go on to the next cell,
+    // Alt+Enter breaks the line, as in AutoCAD's table cells.
+    let cell = app.session.running.as_ref().is_some_and(|r| r.id != "mtext");
+    let at = (mt.insert.x, mt.insert.y);
+    let saved = ctx.data_mut(|d| d.get_temp::<State>(state_id())).filter(|s| s.at == at);
+    let mut st = saved.unwrap_or_else(|| {
+        // Existing contents (a table cell's) are edited; MTEXT starts empty.
+        let mut fmt = if mt.contents.is_empty() { Formatted::default() } else { Formatted::from_contents(&mt.contents) };
         if let Some(f) = app.session.doc().ok().and_then(|d| d.text_style(&mt.style).map(|s| s.font.clone())) {
             // A family name, not a font file (`txt.shx`, `arial.ttf`).
             if !f.is_empty() && !f.contains('.') {
                 fmt.base_font = f;
             }
         }
-        State { fmt, typing: CharFmt::default(), typing_at: 0, top: 70.0, sel: (0, 0), caret: None }
+        let end = fmt.len();
+        State { fmt, typing: CharFmt::default(), typing_at: 0, top: 70.0, sel: (end, end), caret: Some(end), at, focus: true }
     });
     let base_h = if mt.height > 0.0 { mt.height } else { 0.2 };
     let px = ((base_h * scale) as f32).clamp(MIN_PX, MAX_PX);
@@ -88,6 +102,12 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let pos = pos2(at.x.clamp(rect.left(), max_x), at.y.clamp(rect.top() + st.top, (rect.bottom() - 120.0).max(rect.top() + st.top)));
 
     let mut done = Done::No;
+    if cell {
+        let next = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        if next {
+            done = Done::Ok;
+        }
+    }
     let top_start = pos.y - st.top;
     egui::Area::new(egui::Id::new("mtext_editor_area")).order(egui::Order::Foreground).fixed_pos(pos2(pos.x, top_start)).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.accent)).inner_margin(egui::Margin::same(0)).show(ui, |ui| {
@@ -105,7 +125,13 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
                 if ui.button(crate::tl!("Cancel")).clicked() {
                     done = Done::Cancel;
                 }
-                let finish = if ui.ctx().os().is_mac() { crate::tl!("⌘↩ to finish") } else { crate::tl!("Ctrl+Enter to finish") };
+                let finish = if cell {
+                    crate::tl!("Enter or Tab: next cell, Alt+Enter: new line, Esc: done")
+                } else if ui.ctx().os().is_mac() {
+                    crate::tl!("⌘↩ to finish")
+                } else {
+                    crate::tl!("Ctrl+Enter to finish")
+                };
                 ui.label(RichText::new(finish).small().color(t.text_dim));
             });
         });
@@ -122,7 +148,12 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         Done::Ok => {
             ctx.data_mut(|d| d.remove::<State>(state_id()));
             // The editor holds the whole contents: one input, then Enter ends MTEXT's text entry.
-            if !st.fmt.is_empty() {
+            // A table cell takes its text even when emptied.
+            if cell {
+                if let Err(e) = app.session.input(cadcraft_engine::Input::Text(st.fmt.to_contents())) {
+                    app.session.echo(e.to_string());
+                }
+            } else if !st.fmt.is_empty() {
                 let _ = app.session.input(cadcraft_engine::Input::Text(st.fmt.to_contents()));
             }
             if app.session.running.as_ref().is_some_and(|r| r.id == "mtext") {
@@ -279,6 +310,29 @@ fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
             st.fmt.make_list(range.clone(), ListStyle::Number, 3.0 * base_h);
             refocus = true;
         }
+        // Stack: the selected `a/b` (or `a#b`, `a^b`) becomes a fraction, a selected fraction
+        // (or the one before the caret) text again.
+        if ui.button("a⁄b").on_hover_text(crate::tl!("Stack")).clicked() {
+            let chars: Vec<char> = st.fmt.text().chars().collect();
+            let stacked: Vec<usize> = if range.is_empty() {
+                range.start.checked_sub(1).filter(|i| chars.get(*i).is_some_and(|c| st.fmt.stack_of(*c).is_some())).into_iter().collect()
+            } else {
+                range.clone().filter(|i| chars.get(*i).is_some_and(|c| st.fmt.stack_of(*c).is_some())).collect()
+            };
+            if stacked.is_empty() {
+                if st.fmt.stack(range.clone()) {
+                    st.sel = (range.start + 1, range.start + 1);
+                    st.caret = Some(range.start + 1);
+                }
+            } else {
+                for i in stacked.into_iter().rev() {
+                    st.fmt.unstack(i);
+                }
+                let end = st.fmt.len().min(range.end.max(range.start + 1) + 64);
+                st.caret = Some(end.min(st.fmt.len()));
+            }
+            refocus = true;
+        }
         for (glyph, tip, code) in [
             ("⇥|", crate::tl!("Insert tab"), "\t"),
             ("°", crate::tl!("Degree"), "°"),
@@ -384,6 +438,7 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
     }
     let fmt = st.fmt.clone();
     let default_color = t.text;
+    let stack_fmt = st.fmt.clone();
     let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| -> Arc<egui::Galley> {
         let mut job = LayoutJob::default();
         job.wrap.max_width = wrap;
@@ -413,6 +468,33 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
         };
         for (i, c) in s.chars().enumerate() {
             let f = fmt.fmt_at(i);
+            // A stacked fraction: its placeholder made invisible and as wide as the fraction,
+            // which is painted over it.
+            if let Some((top, _, bottom)) = fmt.stack_of(c) {
+                if let Some(p) = &cur {
+                    flush(&mut job, &mut run, p);
+                }
+                cur = None;
+                let size = f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
+                let small = FontId::proportional(size * STACK_SCALE);
+                let width = ui.fonts_mut(|fs| {
+                    let wt = fs.layout_no_wrap(top.clone(), small.clone(), Color32::WHITE).size().x;
+                    let wb = fs.layout_no_wrap(bottom.clone(), small.clone(), Color32::WHITE).size().x;
+                    let own = fs.layout_no_wrap(c.to_string(), FontId::proportional(size), Color32::WHITE).size().x;
+                    (wt.max(wb) + size * 0.3 - own).max(0.0)
+                });
+                job.append(
+                    &c.to_string(),
+                    0.0,
+                    TextFormat {
+                        font_id: FontId::proportional(size),
+                        color: Color32::TRANSPARENT,
+                        extra_letter_spacing: width,
+                        ..TextFormat::default()
+                    },
+                );
+                continue;
+            }
             if cur.as_ref() != Some(&f) {
                 if let Some(p) = &cur {
                     flush(&mut job, &mut run, p);
@@ -433,12 +515,34 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
         .desired_rows(5)
         .margin(egui::Margin::symmetric(4, 4))
         .lock_focus(true)
+        // Opaque: the text being edited (a table cell's) doesn't show through.
+        .background_color(t.panel)
         .char_limit(cadcraft_engine::mtext_edit::MAX_CHARS)
         .layouter(&mut layouter)
         .show(ui);
-    if !out.response.has_focus() && buf.is_empty() && st.fmt.is_empty() {
+    // Stacked fractions: upper text, a bar, lower text, in the room the layout left for them.
+    let painter = ui.painter_at(out.response.rect);
+    for (i, c) in buf.chars().enumerate() {
+        let Some((top, sep, bottom)) = stack_fmt.stack_of(c) else { continue };
+        let a = out.galley.pos_from_cursor(CCursor::new(i)).translate(out.galley_pos.to_vec2());
+        let b = out.galley.pos_from_cursor(CCursor::new(i + 1)).translate(out.galley_pos.to_vec2());
+        let f = stack_fmt.fmt_at(i);
+        let size = f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
+        let color = f.color.map_or(default_color, color32);
+        let (x0, x1) = (a.min.x, if (b.min.y - a.min.y).abs() < 1.0 { b.min.x } else { a.min.x + size });
+        let mid = (a.min.y + a.max.y) / 2.0;
+        let cx = (x0 + x1) / 2.0;
+        let small = FontId::proportional(size * STACK_SCALE);
+        painter.text(pos2(cx, mid - 1.0), Align2::CENTER_BOTTOM, &top, small.clone(), color);
+        painter.text(pos2(cx, mid + 1.0), Align2::CENTER_TOP, &bottom, small, color);
+        if sep != '^' {
+            painter.line_segment([pos2(x0 + 1.0, mid), pos2(x1 - 1.0, mid)], Stroke::new(1.5, color));
+        }
+    }
+    if !out.response.has_focus() && (st.focus || (buf.is_empty() && st.fmt.is_empty())) {
         out.response.request_focus();
     }
+    st.focus = false;
     if out.response.changed() {
         let typing = st.typing.clone();
         st.fmt.set_text(&buf, &typing);
