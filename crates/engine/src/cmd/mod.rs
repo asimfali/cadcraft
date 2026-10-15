@@ -37,6 +37,7 @@ mod selecttools;
 mod settings;
 mod spline_opts;
 mod table;
+pub use table::table_file_kind;
 mod tolerance;
 mod trimextend;
 mod utility;

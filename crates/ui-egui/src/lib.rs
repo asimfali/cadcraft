@@ -49,7 +49,7 @@ pub mod viewcube;
 pub mod vpscale;
 
 pub mod exchange;
-mod file_prompt;
+pub mod file_prompt;
 
 use std::sync::mpsc::Receiver;
 
@@ -380,6 +380,15 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        // The last report and table template files (their folders are where REPORT and
+        // TABLETEMPLATE look for a bare file name).
+        let last = &self.session.last_used;
+        if !last.report_file.is_empty() {
+            prefs["reportFile"] = json!(last.report_file);
+        }
+        if !last.template_file.is_empty() {
+            prefs["templateFile"] = json!(last.template_file);
+        }
         prefs.to_string()
     }
 
@@ -406,6 +415,12 @@ impl CadApp {
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
+        }
+        if let Some(f) = v.get("reportFile").and_then(Value::as_str).filter(|f| f.len() <= 4096) {
+            self.session.last_used.report_file = f.to_string();
+        }
+        if let Some(f) = v.get("templateFile").and_then(Value::as_str).filter(|f| f.len() <= 4096) {
+            self.session.last_used.template_file = f.to_string();
         }
     }
 

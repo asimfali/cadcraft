@@ -33,10 +33,9 @@ use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
 use super::breaks::read_link;
-use super::report::{base_dir, resolve};
+use super::report::{file_kind, file_picker, locate};
 use super::{MAX_COLS, MAX_ROWS, anchors, edit, fit_rows, head_rows, normalize, row_grow_param, set_anchors};
 use crate::cmd::{CommandSpec, bad, point_param, str_param};
-use crate::prompt::Picker;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 use cadcraft_doc::{EntityKind, Handle};
 
@@ -514,10 +513,7 @@ pub struct Loaded {
 
 /// The template `p` gives: `template` (an object or JSON text) or `file` (relative to `base`).
 pub fn load(s: &Session, id: &str, p: &Value, base: Option<&std::path::Path>) -> Result<Loaded> {
-    let file = str_param(p, "file")
-        .map(str::trim)
-        .filter(|f| !f.is_empty())
-        .map(|f| resolve(base.map(std::path::Path::to_path_buf).or_else(|| base_dir(s, None)).as_deref(), f));
+    let file = str_param(p, "file").map(str::trim).filter(|f| !f.is_empty()).map(|f| locate(s, base, f));
     let value: Value = match p.get("template") {
         Some(Value::String(t)) => serde_json::from_str(t).map_err(|e| bad(id, format!("template: not JSON ({e})")))?,
         Some(v @ Value::Object(_)) => v.clone(),
@@ -527,6 +523,10 @@ pub fn load(s: &Session, id: &str, p: &Value, base: Option<&std::path::Path>) ->
         },
         Some(_) => return Err(bad(id, "`template` must be a JSON object")),
     };
+    if file_kind(&value) == Some("report") {
+        let name = file.as_deref().unwrap_or("the template");
+        return Err(bad(id, format!("{name} is a report definition, not a table template: choose a template (it has `columns` with widths)")));
+    }
     let template = parse(&value).map_err(|m| bad(id, m))?;
     let definition = serde_json::to_string(&value).unwrap_or_default();
     let definition = if definition.len() > cadcraft_doc::MAX_REPORT_BYTES { String::new() } else { definition };
@@ -614,11 +614,10 @@ impl Interactive for TemplateM {
         }
         Ok(Step::Continue)
     }
-    fn prompt(&self, _s: &Session) -> Prompt {
+    fn prompt(&self, s: &Session) -> Prompt {
         match self.stage {
             Stage::File => {
-                let p = Prompt::new("Enter table template file", Accept::TEXT)
-                    .picker(Picker::OpenFile { title: "Table template".into(), extensions: vec!["json".into()] });
+                let p = Prompt::new("Enter table template file", Accept::TEXT).picker(file_picker(s, "Table template", "template"));
                 if self.last.is_empty() { p } else { p.default(self.last.clone()) }
             }
             Stage::Rows => Prompt::new("Enter number of data rows", Accept::NUMBER).default(DEFAULT_ROWS.to_string()),

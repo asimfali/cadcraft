@@ -11,6 +11,7 @@ mod template;
 
 pub(crate) use breaks::parse_csv;
 pub(crate) use cells::{recalc, tablestyle_cell_style};
+pub use report::file_kind as table_file_kind;
 
 use cadcraft_doc::{EntityKind, Handle, Table, TableCell};
 use cadcraft_geom::Vec2;

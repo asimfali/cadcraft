@@ -33,6 +33,8 @@ pub struct CmdLine {
     pub option_rows: Vec<(Rect, String)>,
     /// Where the Dynamic Input tooltip stays while the options menu is open.
     pub options_anchor: Option<Pos2>,
+    /// The files a file prompt lists and completes on Tab.
+    pub files: Option<crate::file_prompt::FileList>,
 }
 
 /// The most history lines the command line shows above its bar.
@@ -78,6 +80,10 @@ pub fn capture_tab(ctx: &egui::Context, raw: &mut egui::RawInput) {
 fn tab(app: &mut CadApp) {
     // Grip dimensional input: Tab locks the typed value and moves to the next field.
     if crate::grip_dyn::tab(app) {
+        return;
+    }
+    // A file prompt: Tab completes the file name.
+    if crate::file_prompt::tab(app) {
         return;
     }
     // Over a snap marker with nothing typed, Tab cycles the candidate snaps.

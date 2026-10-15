@@ -54,6 +54,75 @@ pub(super) fn base_dir(s: &Session, file: Option<&str>) -> Option<PathBuf> {
     from_file.or_else(|| s.state().ok()?.path.as_deref().and_then(|p| Path::new(p).parent()).map(Path::to_path_buf))
 }
 
+/// The folders a bare report or template file name is looked for in: those of the last report
+/// and template files, then the drawing's.
+pub(crate) fn search_dirs(s: &Session) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let last = [s.last_used.report_file.as_str(), s.last_used.template_file.as_str()];
+    let dirs = last
+        .iter()
+        .filter_map(|f| Path::new(f.trim()).parent().filter(|p| !p.as_os_str().is_empty()).map(Path::to_path_buf))
+        .chain(base_dir(s, None));
+    for d in dirs {
+        if !out.contains(&d) {
+            out.push(d);
+        }
+    }
+    out
+}
+
+/// A file the user names: as given when it has a folder (relative to `base`, else the
+/// drawing's), else the first of `base` and the [`search_dirs`] that has it.
+pub(super) fn locate(s: &Session, base: Option<&Path>, name: &str) -> String {
+    let p = Path::new(name.trim());
+    let bare = p.components().count() == 1 && p.is_relative();
+    if bare {
+        let dirs = base.map(Path::to_path_buf).into_iter().chain(search_dirs(s));
+        for d in dirs {
+            let f = d.join(p);
+            if exists(&f) {
+                return f.to_string_lossy().into_owned();
+            }
+        }
+    }
+    resolve(base.map(Path::to_path_buf).or_else(|| base_dir(s, None)).as_deref(), name)
+}
+
+fn exists(p: &Path) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        p.is_file()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = p;
+        false
+    }
+}
+
+/// What a JSON table file holds: `"report"` (it has `sections` or `row`), `"template"` (it has
+/// `columns` with widths and no rows) or nothing.
+pub fn file_kind(v: &Value) -> Option<&'static str> {
+    let o = v.as_object()?;
+    if o.contains_key("sections") || o.contains_key("row") {
+        Some("report")
+    } else if o.get("columns").and_then(Value::as_array).is_some_and(|c| c.iter().any(|x| x.get("width").is_some())) {
+        Some("template")
+    } else {
+        None
+    }
+}
+
+/// The picker of a prompt for a report or template file.
+pub(super) fn file_picker(s: &Session, title: &str, kind: &str) -> Picker {
+    Picker::OpenFile {
+        title: title.into(),
+        extensions: vec!["json".into()],
+        dirs: search_dirs(s).iter().map(|d| d.to_string_lossy().into_owned()).collect(),
+        kind: kind.into(),
+    }
+}
+
 pub(super) fn resolve(base: Option<&Path>, path: &str) -> String {
     let p = Path::new(path.trim());
     match base {
@@ -77,7 +146,7 @@ fn parse_definition(id: &str, text: &str, from: &str) -> Result<Value> {
 
 /// The definition `p` gives: `definition` (an object or JSON text) or `file`.
 fn load(s: &Session, id: &str, p: &Value) -> Result<Loaded> {
-    let file = str_param(p, "file").map(str::trim).filter(|f| !f.is_empty()).map(|f| resolve(base_dir(s, None).as_deref(), f));
+    let file = str_param(p, "file").map(str::trim).filter(|f| !f.is_empty()).map(|f| locate(s, None, f));
     let value = match p.get("definition") {
         Some(Value::String(t)) => parse_definition(id, t, "definition")?,
         Some(v @ Value::Object(_)) => v.clone(),
@@ -87,6 +156,10 @@ fn load(s: &Session, id: &str, p: &Value) -> Result<Loaded> {
         },
         Some(_) => return Err(bad(id, "`definition` must be a JSON object")),
     };
+    if file_kind(&value) == Some("template") {
+        let name = file.as_deref().unwrap_or("the definition");
+        return Err(bad(id, format!("{name} is a table template, not a report: choose a report definition (it has `sections` or `row`)")));
+    }
     let report = def::parse(&value).map_err(|m| bad(id, m))?;
     let template = match &report.template {
         None => None,
@@ -497,11 +570,10 @@ impl Interactive for ReportM {
     fn name(&self) -> &'static str {
         "REPORT"
     }
-    fn prompt(&self, _s: &Session) -> Prompt {
+    fn prompt(&self, s: &Session) -> Prompt {
         match self.stage {
             Stage::File => {
-                let p = Prompt::new("Enter report file name", Accept::TEXT)
-                    .picker(Picker::OpenFile { title: "Report definition".into(), extensions: vec!["json".into()] });
+                let p = Prompt::new("Enter report file name", Accept::TEXT).picker(file_picker(s, "Report definition", "report"));
                 if self.last.is_empty() { p } else { p.default(self.last.clone()) }
             }
             Stage::Select if self.sel.removing => self.sel.prompt(),

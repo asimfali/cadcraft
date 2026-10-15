@@ -13,7 +13,7 @@ list is a definition file, and it can be kept in a company folder and versioned 
 
 | Command | What it does |
 |---|---|
-| `REPORT` (`RPT`), Tools ▸ Report Table... | Asks for the report file (Browse... opens a file dialog), the objects to read (Enter: all of them) and the insertion point. |
+| `REPORT` (`RPT`), Tools ▸ Report Table... | Asks for the report file, the objects to read (Enter: all of them) and the insertion point. While it asks for the file, a window lists the report definitions in the usual folders (click one) with Browse... for any other, and Tab at the command line completes a file name from that list. A bare name is looked for in the folders of the last report and template files, then the drawing's; the last files are remembered between sessions. |
 | `REPORTUPDATE` (`RPTU`) | Makes the selected report tables again (Enter: every report table). The rows above the data (title, header) stay as you edited them, and new rows take the look of the first data row. |
 
 The JSON form (`engine.execute`, scripts, MCP):

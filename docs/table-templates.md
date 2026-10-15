@@ -10,7 +10,7 @@ A standard (GOST 2.106, a DIN/ISO parts list, an ASME BOM) is a template file, n
 
 | Command | What it does |
 |---|---|
-| `TABLETEMPLATE` (`TTPL`), Draw ▸ Table from Template... | Asks for the template file (Browse... opens a file dialog), the number of data rows and the insertion point. With a table selected, it lays that table out by the template instead: its data rows stay. |
+| `TABLETEMPLATE` (`TTPL`), Draw ▸ Table from Template... | Asks for the template file (listed in a window and completed on Tab like REPORT's, or Browse...), the number of data rows and the insertion point. With a table selected, it lays that table out by the template instead: its data rows stay. |
 | Right-click a table or its cells ▸ Apply Table Template... | The same for that table. |
 
 JSON form: `{"file": "gost.json", "at": [0, 0], "rows": 10}` or `{"file": "gost.json", "handle": "1A2"}`

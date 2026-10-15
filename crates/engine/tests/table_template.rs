@@ -179,3 +179,31 @@ fn bad_template_calls_are_errors() {
         assert!(s.execute("tabletemplate", &p).is_err(), "{p}");
     }
 }
+
+#[test]
+fn bare_file_names_are_found_and_wrong_kinds_explained() {
+    let dir = std::env::temp_dir().join(format!("cadcraft-template-find-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("gost.json"), serde_json::to_string(&gost()).unwrap()).unwrap();
+    std::fs::write(dir.join("rings.json"), r#"{"template": "gost.json", "from": "circle", "row": ["{#}"]}"#).unwrap();
+    let mut s = Session::new();
+    // The folder of the last report file is searched for a bare name.
+    s.last_used.report_file = dir.join("rings.json").to_string_lossy().into_owned();
+    assert!(s.execute("report", &json!({ "file": "rings.json" })).is_ok());
+    assert!(s.execute("tabletemplate", &json!({ "file": "gost.json", "at": [0, 0] })).is_ok());
+    // A template given as a report, and a report as a template, say what they are.
+    let e = s.execute("report", &json!({ "file": "gost.json" })).unwrap_err().to_string();
+    assert!(e.contains("is a table template, not a report"), "{e}");
+    let e = s.execute("tabletemplate", &json!({ "file": "rings.json", "at": [0, 0] })).unwrap_err().to_string();
+    assert!(e.contains("is a report definition, not a table template"), "{e}");
+    // The prompt offers the folders and the kind.
+    s.cmdline("report").unwrap();
+    match s.current_prompt().and_then(|p| p.picker) {
+        Some(cadcraft_engine::Picker::OpenFile { dirs, kind, .. }) => {
+            assert_eq!(kind, "report");
+            assert_eq!(dirs.first().map(String::as_str), Some(dir.to_string_lossy().as_ref()));
+        }
+        other => panic!("{other:?}"),
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

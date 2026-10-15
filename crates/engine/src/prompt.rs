@@ -76,8 +76,10 @@ pub enum Picker {
     /// A hatch pattern by name (see [`crate::pattern_choices`]); holds the current pattern.
     HatchPattern(String),
     /// A file to open: the UI can offer its file dialog, filtered to these extensions (lower
-    /// case, no dot); the chosen path is entered as text.
-    OpenFile { title: String, extensions: Vec<String> },
+    /// case, no dot), and list (and complete on Tab) the files of `kind` in `dirs`, where a bare
+    /// file name is looked for; the chosen path is entered as text. Kinds: `report` and
+    /// `template` ([`crate::cmd::table_file_kind`]), empty for any file.
+    OpenFile { title: String, extensions: Vec<String>, dirs: Vec<String>, kind: String },
 }
 
 impl Prompt {
