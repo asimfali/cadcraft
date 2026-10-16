@@ -81,7 +81,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let (rect, scale) = app.canvas.xf.map_or((ctx.content_rect(), 20.0), |x| (x.rect, x.scale.max(1e-6)));
     // A table cell (TABLEDIT): Enter and Tab keep the text and go on to the next cell,
     // Alt+Enter breaks the line, as in AutoCAD's table cells.
-    let cell = app.session.running.as_ref().is_some_and(|r| r.id != "mtext");
+    let cell = app.session.running.as_ref().is_some_and(|r| r.id == "tabledit");
     let at = (mt.insert.x, mt.insert.y);
     let saved = ctx.data_mut(|d| d.get_temp::<State>(state_id())).filter(|s| s.at == at);
     let mut st = saved.unwrap_or_else(|| {
@@ -157,12 +157,15 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             ctx.data_mut(|d| d.remove::<State>(state_id()));
             // The editor holds the whole contents: one input, then Enter ends MTEXT's text entry.
             // A table cell takes its text even when emptied.
-            if cell {
+            if cell || (app.session.running.as_ref().is_some_and(|r| r.id == "textedit") && !st.fmt.is_empty()) {
                 if let Err(e) = app.session.input(cadcraft_engine::Input::Text(st.fmt.to_contents())) {
                     app.session.echo(e.to_string());
                 }
             } else if !st.fmt.is_empty() {
                 let _ = app.session.input(cadcraft_engine::Input::Text(st.fmt.to_contents()));
+            } else if app.session.running.as_ref().is_some_and(|r| r.id == "textedit") {
+                // Emptied: TEXTEDIT keeps the old text, as Enter at its prompt does.
+                let _ = app.session.input(cadcraft_engine::Input::Enter);
             }
             if app.session.running.as_ref().is_some_and(|r| r.id == "mtext") {
                 let _ = app.session.input(cadcraft_engine::Input::Enter);
