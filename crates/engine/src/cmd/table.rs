@@ -19,7 +19,8 @@ use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
 use super::helpers::v3;
-use super::*;
+use super::{CommandSpec, bad, point_req, size_param, str_param};
+
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 /// Caps for hostile parameters.
@@ -155,6 +156,25 @@ fn run_table(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handle": h.hex() }))
 }
 
+/// The table `handle`, or else the selected table. A supplied `handle` that can't be read is an
+/// error, never a silent fall back to the selection (like `targets`).
+fn table_handle(s: &Session, p: &Value, id: &str) -> Result<Handle> {
+    let explicit = match p.get("handle") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_str()
+                .and_then(Handle::parse_hex)
+                .or_else(|| v.as_u64().map(Handle))
+                .ok_or_else(|| bad(id, format!("`handle`: {v} is not an object handle (a hex string such as \"1A2\")")))?,
+        ),
+    };
+    explicit
+        .or_else(|| {
+            s.selection().into_iter().find(|h| s.doc().ok().and_then(|d| d.entity(*h)).is_some_and(|e| matches!(e.kind, EntityKind::Table(_))))
+        })
+        .ok_or_else(|| bad(id, "`handle` of a table is required"))
+}
+
 /// Modify the table `handle` with `f`.
 fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std::result::Result<(), String>) -> Result<Value> {
     let (h, mut t) = find(s, p, id)?;
@@ -169,13 +189,7 @@ fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std:
 
 /// The table `handle` names (else the selected one), and a copy of it.
 fn find(s: &Session, p: &Value, id: &str) -> Result<(Handle, Table)> {
-    let h = p
-        .get("handle")
-        .and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle)))
-        .or_else(|| {
-            s.selection().into_iter().find(|h| s.doc().ok().and_then(|d| d.entity(*h)).is_some_and(|e| matches!(e.kind, EntityKind::Table(_))))
-        })
-        .ok_or_else(|| bad(id, "`handle` of a table is required"))?;
+    let h = table_handle(s, p, id)?;
     match s.doc()?.entity(h).map(|e| &e.kind) {
         Some(EntityKind::Table(t)) => Ok((h, t.clone())),
         _ => Err(bad(id, "object is not a table")),

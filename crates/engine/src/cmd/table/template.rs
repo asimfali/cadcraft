@@ -558,7 +558,7 @@ pub fn load(s: &Session, id: &str, p: &Value, base: Option<&std::path::Path>) ->
         Some(Value::String(t)) => serde_json::from_str(t).map_err(|e| bad(id, format!("template: not JSON ({e})")))?,
         Some(v @ Value::Object(_)) => v.clone(),
         Some(Value::Null) | None => match &file {
-            Some(f) => serde_json::from_str(&read_link(id, f)?).map_err(|e| bad(id, format!("{f}: not JSON ({e})")))?,
+            Some(f) => serde_json::from_str(&read_link(id, std::path::Path::new(f))?).map_err(|e| bad(id, format!("{f}: not JSON ({e})")))?,
             None => return Err(bad(id, "a table template is required: `file` (.json) or `template`")),
         },
         Some(_) => return Err(bad(id, "`template` must be a JSON object")),

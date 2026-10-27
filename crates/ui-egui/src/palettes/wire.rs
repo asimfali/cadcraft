@@ -15,7 +15,7 @@ const VARIES: &str = "*VARIES*";
 /// The choices, worked out once per drawing revision.
 fn choices(ctx: &egui::Context, app: &CadApp) -> Choices {
     let Ok(st) = app.session.state() else { return Choices::default() };
-    let id = egui::Id::new(("wire-choices", st.uid, st.revision));
+    let id = egui::Id::unique(("wire-choices", st.uid, st.revision));
     if let Some(c) = ctx.data(|d| d.get_temp::<Choices>(id)) {
         return c;
     }
@@ -102,7 +102,7 @@ pub(super) fn section(app: &CadApp, ui: &mut egui::Ui, wires: &[Handle], group: 
     }
     let c = choices(ui.ctx(), app);
     let ids: Vec<String> = wires.iter().map(|h| h.hex()).collect();
-    let key = |k: &str| egui::Id::new(("wire-field", k, ids.clone()));
+    let key = |k: &str| egui::Id::unique(("wire-field", k, ids.clone()));
     let mut set: Option<Value> = None;
     let mut put = |k: &str, v: Value| set = Some(json!({ "handles": ids, k: v }));
     group(ui, "Wire");

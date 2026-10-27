@@ -23,6 +23,8 @@ fn harness() -> (Harness<'static, CadApp>, Handle) {
     app.canvas.zoom_pending = false;
     let mut harness = Harness::builder().with_size(vec2(1600.0, 1000.0)).with_step_dt(1.0 / 60.0).build_ui_state(
         |ui, app: &mut CadApp| {
+            // The stacked-fraction placeholder is a private-use character no test font draws.
+            ui.ctx().set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
             app.logic(ui.ctx());
             app.ui(ui);
         },

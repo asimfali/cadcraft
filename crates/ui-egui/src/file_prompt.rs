@@ -127,7 +127,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let mut chosen = None;
     let area = ctx.content_rect();
     egui::Window::new(crate::i18n::t(&title))
-        .id(egui::Id::new("prompt_open_file"))
+        .id(egui::Id::unique("prompt_open_file"))
         .collapsible(false)
         .resizable(false)
         .default_pos(pos2(area.center().x - 160.0, area.max.y - 320.0))

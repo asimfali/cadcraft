@@ -157,7 +157,7 @@ fn load(s: &Session, id: &str, p: &Value) -> Result<Loaded> {
         Some(Value::String(t)) => parse_definition(id, t, "definition")?,
         Some(v @ Value::Object(_)) => v.clone(),
         Some(Value::Null) | None => match &file {
-            Some(f) => parse_definition(id, &read_link(id, f)?, f)?,
+            Some(f) => parse_definition(id, &read_link(id, std::path::Path::new(f))?, f)?,
             None => return Err(bad(id, "a report definition is required: `file` (.json) or `definition`")),
         },
         Some(_) => return Err(bad(id, "`definition` must be a JSON object")),
@@ -183,7 +183,7 @@ fn load(s: &Session, id: &str, p: &Value) -> Result<Loaded> {
 
 /// The rows of a lookup file: CSV with a header row, or a JSON list of objects.
 fn lookup_file(id: &str, path: &str) -> Result<Vec<std::collections::BTreeMap<String, String>>> {
-    let text = read_link(id, path)?;
+    let text = read_link(id, std::path::Path::new(path))?;
     if path.to_ascii_lowercase().ends_with(".json") {
         let v: Value = parse_definition(id, &text, path)?;
         let a = v.as_array().ok_or_else(|| bad(id, format!("{path}: a lookup file must hold a list of objects")))?;
